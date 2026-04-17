@@ -3,6 +3,7 @@ use std::path::Path;
 
 mod ast;
 mod converter;
+mod macros;
 mod parser;
 
 use converter::HexPatConverter;
@@ -29,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let template = parser.parse()?;
 
     // Convert to ImHex format
-    let converter = HexPatConverter::new();
+    let mut converter = HexPatConverter::new();
     let hexpat = converter.convert(&template)?;
 
     // Write output

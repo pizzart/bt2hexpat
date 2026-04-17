@@ -2,21 +2,18 @@ use crate::ast::*;
 use std::collections::VecDeque;
 
 pub struct Parser {
-    tokens: VecDeque<String>,
+    tokens: VecDeque<TokenKind>,
     pos: usize,
-    lines: Vec<String>,
     context_stack: Vec<String>, // Track nested contexts
 }
 
 impl Parser {
     pub fn new(content: &str) -> Self {
         let tokens = Self::tokenize(content);
-        let lines: Vec<String> = content.lines().map(|s| s.to_string()).collect();
 
         Parser {
             tokens,
             pos: 0,
-            lines,
             context_stack: Vec::new(),
         }
     }
@@ -32,217 +29,100 @@ impl Parser {
         }
     }
 
-    fn get_context_stack(&self) -> String {
-        if self.context_stack.is_empty() {
-            "top-level".to_string()
-        } else {
-            self.context_stack.join(" > ")
-        }
-    }
+    // fn get_context_stack(&self) -> String {
+    //     if self.context_stack.is_empty() {
+    //         "top-level".to_string()
+    //     } else {
+    //         self.context_stack.join(" > ")
+    //     }
+    // }
 
     fn get_context(&self) -> String {
-        let line_num = self.get_line_number();
-        let context = if line_num > 0 && line_num <= self.lines.len() {
-            let line = &self.lines[line_num - 1];
-            let trimmed = line.trim();
-            format!(
-                "  Line {}: {}\n  Block context: {}",
-                line_num,
-                trimmed,
-                self.get_context_stack()
-            )
-        } else {
-            format!("  Block context: {}", self.get_context_stack())
-        };
+        let mut context = "Context: ".to_string();
+        for i in 0..=4 {
+            if let Some(t) = self.tokens.get(self.pos + i - 2).map(|t| t.to_string()) {
+                context.push_str(&t);
+                context.push_str(" ");
+            }
+        }
         context
     }
 
-    fn get_line_number(&self) -> usize {
-        let mut line = 1;
-        for i in 0..self.pos.min(self.tokens.len()) {
-            if self.tokens[i] == "\n" {
-                line += 1;
-            }
-        }
-        line
-    }
-
-    fn tokenize(content: &str) -> VecDeque<String> {
+    fn tokenize(content: &str) -> VecDeque<TokenKind> {
         let mut tokens = VecDeque::new();
         let mut current = String::new();
-        let mut in_comment = false;
-        let mut in_line_comment = false;
         let mut chars = content.chars().peekable();
 
         while let Some(ch) = chars.next() {
-            if in_line_comment {
-                if ch == '\n' {
-                    in_line_comment = false;
-                    // tokens.push_back("\n".to_string());
-                }
-                continue;
-            }
-
-            if in_comment {
-                if ch == '*' && chars.peek() == Some(&'/') {
-                    chars.next();
-                    in_comment = false;
-                }
-                continue;
-            }
-
             match ch {
                 '/' if chars.peek() == Some(&'/') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
+                    current.clear();
+                    while let Some(c) = chars.next() {
+                        if c == '\n' {
+                            break;
+                        }
                     }
-                    chars.next();
-                    in_line_comment = true;
                 }
                 '/' if chars.peek() == Some(&'*') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
+                    current.clear();
+                    while let Some(c) = chars.next() {
+                        if c == '*' && chars.peek() == Some(&'/') {
+                            chars.next();
+                            break;
+                        }
                     }
-                    chars.next();
-                    in_comment = true;
                 }
-                '!' if chars.peek() == Some(&'=') => {
+                ' ' | '\r' | '\n' | '\t' => {
                     if !current.is_empty() {
-                        tokens.push_back(current.clone());
+                        print!("{} ", current);
+                        tokens.push_back(current.parse().unwrap());
                         current.clear();
                     }
-                    chars.next();
-                    tokens.push_back("!=".to_string());
-                }
-                '=' if chars.peek() == Some(&'=') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    chars.next();
-                    tokens.push_back("==".to_string());
-                }
-                '<' if chars.peek() == Some(&'=') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    chars.next();
-                    tokens.push_back("<=".to_string());
-                }
-                '>' if chars.peek() == Some(&'=') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    chars.next();
-                    tokens.push_back(">=".to_string());
-                }
-                '&' if chars.peek() == Some(&'&') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    chars.next();
-                    tokens.push_back("&&".to_string());
-                }
-                '|' if chars.peek() == Some(&'|') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    chars.next();
-                    tokens.push_back("||".to_string());
-                }
-                '+' if chars.peek() == Some(&'=') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    chars.next();
-                    tokens.push_back("+=".to_string());
-                }
-                '-' if chars.peek() == Some(&'=') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    chars.next();
-                    tokens.push_back("-=".to_string());
-                }
-                '*' if chars.peek() == Some(&'=') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    chars.next();
-                    tokens.push_back("*=".to_string());
-                }
-                '/' if chars.peek() == Some(&'=') => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    chars.next();
-                    tokens.push_back("/=".to_string());
-                }
-                '(' | ')' | '{' | '}' | '[' | ']' | ';' | ',' | '=' | '<' | '>' | '+' | '-'
-                | '*' | '/' | '&' | '|' | '!' => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    tokens.push_back(ch.to_string());
                 }
                 '"' => {
                     if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
+                        tokens.push_back(current.parse().unwrap());
                     }
-                    let mut string_content = String::from("\"");
-                    while let Some(str_ch) = chars.next() {
-                        string_content.push(str_ch);
-                        if str_ch == '"' {
+                    current = ch.to_string();
+                    while let Some(c) = chars.next() {
+                        current.push(c);
+                        if c != '\\' && chars.peek() == Some(&'"') {
+                            current.push(chars.next().unwrap());
+                            tokens.push_back(current.parse().unwrap());
+                            current.clear();
                             break;
                         }
                     }
-                    tokens.push_back(string_content);
                 }
                 '\'' => {
                     if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
+                        tokens.push_back(current.parse().unwrap());
                     }
-                    let mut char_content = String::from("'");
-                    while let Some(ch_char) = chars.next() {
-                        char_content.push(ch_char);
-                        if ch_char == '\'' {
+                    current = ch.to_string();
+                    while let Some(c) = chars.next() {
+                        current.push(c);
+                        if c != '\\' && chars.peek() == Some(&'\'') {
+                            tokens.push_back(current.parse().unwrap());
+                            current.push(chars.next().unwrap());
+                            current.clear();
                             break;
                         }
                     }
-                    tokens.push_back(char_content);
                 }
-                '\n' => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
-                    // tokens.push_back("\n".to_string());
-                }
-                ' ' | '\t' | '\r' => {
-                    if !current.is_empty() {
-                        tokens.push_back(current.clone());
-                        current.clear();
-                    }
+                _ if !current.is_empty()
+                    && let TokenKind::Unknown(_) =
+                        format!("{}{}", current, ch).parse().unwrap() =>
+                {
+                    print!("{} ", current);
+                    tokens.push_back(current.parse().unwrap());
+                    current = ch.to_string();
                 }
                 _ => current.push(ch),
             }
         }
 
         if !current.is_empty() {
-            tokens.push_back(current);
+            tokens.push_back(current.parse().unwrap());
         }
 
         tokens
@@ -253,59 +133,7 @@ impl Parser {
         self.push_context("top-level");
 
         while !self.is_eof() {
-            let token = self.peek_token().to_lowercase();
-
-            match token.as_str() {
-                "typedef" => {
-                    eprintln!("[DEBUG] Reading typedef");
-                    self.push_context("typedef");
-                    statements.push(self.parse_typedef()?);
-                    self.pop_context();
-                }
-                "struct" => {
-                    eprintln!("[DEBUG] Reading struct");
-                    self.push_context("struct");
-                    statements.push(self.parse_struct()?);
-                    self.pop_context();
-                }
-                "enum" => {
-                    eprintln!("[DEBUG] Reading enum");
-                    self.push_context("enum");
-                    statements.push(self.parse_enum()?);
-                    self.pop_context();
-                }
-                "local" => {
-                    eprintln!("[DEBUG] Reading local variable");
-                    self.push_context("local variable");
-                    statements.push(self.parse_var_decl(true)?);
-                    self.pop_context();
-                }
-                "if" => {
-                    eprintln!("[DEBUG] Reading if statement");
-                    statements.push(self.parse_if()?);
-                }
-                "while" => {
-                    eprintln!("[DEBUG] Reading while loop");
-                    statements.push(self.parse_while()?);
-                }
-                "warning" | "printf" | "littleendian" | "bigendian" | "requiresversion" => {
-                    eprintln!("[DEBUG] Reading function call: {}", token);
-                    self.parse_function_call()?;
-                }
-                _ if self.is_type_start(&token) => {
-                    eprintln!("[DEBUG] Reading variable declaration with type: {}", token);
-                    statements.push(self.parse_var_decl(false)?);
-                }
-                _ => {
-                    eprintln!("[DEBUG] Reading expression statement: {}", token);
-                    self.push_context("expression statement");
-                    match self.parse_expression_statement()? {
-                        Some(s) => statements.push(s),
-                        None => (),
-                    }
-                    self.pop_context();
-                }
-            }
+            statements.push(self.parse_declaration()?);
         }
 
         self.pop_context();
@@ -315,66 +143,82 @@ impl Parser {
         })
     }
 
-    fn parse_expression_statement(&mut self) -> Result<Option<Statement>, String> {
-        // let start_pos = self.pos;
-
-        let expr = self.parse_primary_expr()?;
-        dbg!(&expr);
-        match self.peek_token() {
-            "=" => {
-                self.advance();
-                let right = self.parse_expr()?;
-                self.expect(";")?;
-                Ok(Some(Statement::Assign { left: expr, right }))
+    fn parse_declaration(&mut self) -> Result<Statement, String> {
+        match self.peek_token()? {
+            // kinda cursed, but this is how it is
+            TokenKind::Keyword(Keyword::Struct) => {
+                if let Ok(d) = self.try_parse_var_decl(false) {
+                    Ok(d)
+                } else {
+                    self.parse_struct()
+                }
             }
-            _ => match expr {
-                Expression::FunctionCall(ident, args) => {
-                    self.advance();
-                    Ok(Some(Statement::FunctionCall(ident, args)))
-                }
-                _ => {
-                    while self.peek_token() != ";" && !self.is_eof() {
-                        self.advance();
-                    }
-                    eprintln!("[DEBUG] Meaningless statement {}", self.get_context());
-                    Ok(None)
-                }
-            },
+            TokenKind::Keyword(Keyword::Enum) => self.parse_enum(),
+            TokenKind::Keyword(Keyword::Typedef) => self.parse_typedef(),
+            TokenKind::Keyword(Keyword::Local) => self.parse_var_decl(true),
+            TokenKind::Keyword(Keyword::DataType(_) | Keyword::Unsigned | Keyword::Signed) => {
+                self.parse_var_decl(false)
+            }
+            TokenKind::Ident(_) if matches!(self.peek_token_after(1)?, TokenKind::Ident(_)) => {
+                self.parse_var_decl(false)
+            }
+            _ => self.parse_statement(),
+        }
+    }
+
+    // fn is_type(&self, token: &str) -> bool {
+    //     !matches!(
+    //         token,
+    //         "auto"
+    //             | "break"
+    //             | "case"
+    //             | "const"
+    //             | "continue"
+    //             | "default"
+    //             | "else"
+    //             | "enum"
+    //             | "false"
+    //             | "for"
+    //             | "if"
+    //             | "include"
+    //             | "return"
+    //             | "static"
+    //             | "struct"
+    //             | "switch"
+    //             | "true"
+    //             | "typedef"
+    //             | "union"
+    //             | "void"
+    //             | "while"
+    //     ) && !token.chars().nth(0).is_some_and(|c| char::is_numeric(c))
+    // }
+
+    fn parse_expression_statement(&mut self) -> Result<Statement, String> {
+        let expr = self.parse_expr()?;
+
+        if self.peek_token()? == &Punctuator::Assign {
+            self.advance();
+            let rhs = self.parse_expr()?;
+            self.expect(Punctuator::Semicolon)?;
+            return Ok(Statement::Assign {
+                left: expr,
+                right: rhs,
+            });
         }
 
-        // let mut depth = 0;
-        // while !self.is_eof() {
-        //     let token = self.peek_token();
-
-        //     match token {
-        //         // "(" | "{" | "[" => depth += 1,
-        //         // ")" | "}" | "]" => depth -= 1,
-        //         ";" if depth == 0 => {
-        //             self.advance();
-        //             eprintln!(
-        //                 "[DEBUG] Finished expression statement at position {}",
-        //                 self.pos
-        //             );
-        //             return Ok(());
-        //         }
-        //         _ => {}
-        //     }
-
-        //     self.advance();
-        // }
-
-        // Ok(())
+        self.expect(Punctuator::Semicolon)?;
+        Ok(Statement::Expr(expr))
     }
 
     fn parse_typedef(&mut self) -> Result<Statement, String> {
-        self.expect("typedef")?;
+        self.expect(Keyword::Typedef)?;
 
-        if self.peek_token().to_lowercase() == "struct" {
+        if self.peek_token()? == &Keyword::Struct {
             eprintln!("[DEBUG] Parsing typedef struct");
-            self.expect("struct")?;
+            self.expect(Keyword::Struct)?;
 
-            let struct_name = if self.peek_token() != "{" {
-                let name = self.peek_token().to_string();
+            let struct_name = if matches!(self.peek_token()?, TokenKind::Ident(_)) {
+                let name = self.peek_token()?.to_string();
                 self.advance();
 
                 name
@@ -382,31 +226,31 @@ impl Parser {
                 "".to_string()
             };
 
-            self.expect("{")?;
+            self.expect(Punctuator::LBrace)?;
 
             self.push_context(&format!("typedef struct {} fields", struct_name));
-            let fields = self.parse_struct_contents()?;
+            let fields = self.parse_struct_body()?;
             self.pop_context();
 
-            self.expect("}")?;
+            self.expect(Punctuator::RBrace)?;
 
-            if self.peek_token() == "<" {
-                self.skip_until(">")?;
+            if self.peek_token()? == &Punctuator::LAngledBracket {
+                self.skip_until(Punctuator::RAngledBracket)?;
             }
 
-            let type_name = self.peek_token().to_string();
+            let type_name = self.peek_token()?.to_string();
             eprintln!("[DEBUG] Typedef struct name: {}", type_name);
             self.advance();
 
-            if self.peek_token() == "<" {
-                self.skip_until(">")?;
+            if self.peek_token()? == &Punctuator::LAngledBracket {
+                self.skip_until(Punctuator::RAngledBracket)?;
             }
 
-            self.expect(";")?;
+            self.expect(Punctuator::Semicolon)?;
 
             Ok(Statement::StructDef {
                 ident: type_name,
-                fields,
+                body: fields,
             })
         } else {
             eprintln!("[DEBUG] Parsing typedef type alias");
@@ -414,15 +258,15 @@ impl Parser {
                 .parse_type()
                 .map_err(|e| format!("{}. Context: parsing typedef{}", e, self.get_context()))?;
 
-            let name = self.peek_token().to_string();
+            let name = self.peek_token()?.to_string();
             eprintln!("[DEBUG] Typedef name: {}", name);
             self.advance();
 
             let mut ty = base_ty;
-            while self.peek_token() == "[" {
+            while self.peek_token()? == &Punctuator::LBracket {
                 self.advance();
 
-                let size = if self.peek_token() != "]" {
+                let size = if self.peek_token()? != &Punctuator::RBracket {
                     Some(Box::new(self.parse_expr().map_err(|e| {
                         format!(
                             "{}. Context: parsing typedef array dimension{}",
@@ -434,7 +278,7 @@ impl Parser {
                     None
                 };
 
-                self.expect("]").map_err(|e| {
+                self.expect(Punctuator::RBracket).map_err(|e| {
                     format!(
                         "{}. Context: in typedef array definition{}",
                         e,
@@ -445,393 +289,218 @@ impl Parser {
                 ty = DataType::Array(Box::new(ty), size);
             }
 
-            self.expect(";")
-                .map_err(|e| format!("{}. Context: at end of typedef statement. Current token: '{}' at position {}. Expected ';'", e, self.peek_token(), self.pos))?;
+            self.expect(Punctuator::Semicolon)
+                .map_err(|e| format!("{}. Context: at end of typedef statement. Current token: '{}' at position {}. Expected ';'", e, self.peek_token().unwrap(), self.pos))?;
 
             Ok(Statement::TypeDef { ident: name, ty })
         }
     }
 
     fn parse_struct(&mut self) -> Result<Statement, String> {
-        self.expect("struct")?;
+        self.expect(Keyword::Struct)?;
 
-        let name = self.peek_token().to_string();
+        let name = self.peek_token()?.to_string();
         eprintln!("[DEBUG] Parsing struct: {}", name);
         self.advance();
 
-        if self.peek_token() == "<" {
-            self.skip_until(">")?;
+        if self.peek_token()? == &Punctuator::LAngledBracket {
+            self.skip_until(Punctuator::RAngledBracket)?;
         }
 
-        self.expect("{")?;
+        self.expect(Punctuator::LBrace)?;
         eprintln!("[DEBUG] Entered struct body");
 
         self.push_context(&format!("struct {} fields", name));
-        let fields = self.parse_struct_contents()?;
+        let fields = self.parse_struct_body()?;
         self.pop_context();
 
-        eprintln!(
-            "[DEBUG] About to close struct, current token: '{}'",
-            self.peek_token()
-        );
-
-        self.expect("}")?;
-        eprintln!("[DEBUG] Struct closed successfully");
+        self.expect(Punctuator::RBrace)?;
+        eprintln!("[DEBUG] Struct {} closed successfully", name);
 
         // Handle optional style annotation
-        if self.peek_token() == "<" {
-            self.skip_until(">")?;
+        if self.peek_token()? == &Punctuator::LAngledBracket {
+            self.skip_until(Punctuator::RAngledBracket)?;
         }
 
         // Optional type name after closing brace
-        if self.peek_token() != ";"
-            && !self.is_eof()
-            && self.peek_token() != "local"
-            && !self.is_type_start(self.peek_token())
+        if self.peek_token()? != &Punctuator::Semicolon
+            && self.peek_token()? != &Keyword::Local
+            && !self.is_type_start(self.peek_token()?)
         {
             self.advance();
         }
 
-        if self.peek_token() == ";" {
+        if self.peek_token()? == &Punctuator::Semicolon {
             self.advance();
         }
 
         Ok(Statement::StructDef {
             ident: name,
-            fields,
+            body: fields,
         })
     }
 
-    fn parse_struct_contents(&mut self) -> Result<Vec<StructContent>, String> {
-        let mut contents = Vec::new();
+    fn parse_struct_body(&mut self) -> Result<Vec<StructItem>, String> {
+        let mut items = Vec::new();
 
-        while self.peek_token() != "}" && !self.is_eof() {
-            // if self.peek() == "}" || self.is_eof() {
-            //     break;
-            // }
-
-            let token_lower = self.peek_token().to_lowercase();
-
-            // Handle local statements inside structs - skip them
-            if token_lower == "local" {
-                eprintln!("[DEBUG] Parsing local variable in struct");
-                self.push_context("local");
-                self.advance();
-
-                while self.peek_token() != ";" && !self.is_eof() {
-                    self.advance();
-                }
-
-                if self.peek_token() == ";" {
-                    self.advance();
-                }
-
-                self.pop_context();
-                continue;
-            }
-
-            // Handle if statements inside structs
-            if token_lower == "if" {
-                eprintln!("[DEBUG] Parsing if statement in struct");
-                self.push_context("if statement");
-                let if_stmt = self.parse_if()?;
-                self.pop_context();
-
-                // After parsing if, check for else/else if and consume them
-                while self.peek_token().to_lowercase() == "else" {
-                    eprintln!("[DEBUG] Parsing else clause after if in struct");
-                    self.advance();
-
-                    // Check for "else if"
-                    if self.peek_token().to_lowercase() == "if" {
-                        eprintln!("[DEBUG] Parsing else if in struct");
-                        self.advance();
-
-                        self.expect("(")?;
-
-                        self.parse_expr()?;
-
-                        self.expect(")")?;
-                    }
-
-                    // Parse the block or statement
-                    if self.peek_token() == "{" {
-                        self.advance();
-
-                        let mut brace_depth = 1;
-                        while brace_depth > 0 && !self.is_eof() {
-                            match self.peek_token() {
-                                "{" => brace_depth += 1,
-                                "}" => brace_depth -= 1,
-                                _ => {}
-                            }
-                            if brace_depth > 0 {
-                                self.advance();
-                            }
-                        }
-                        self.advance(); // consume final }
-                    } else {
-                        // Single statement
-                        while self.peek_token() != ";" && !self.is_eof() {
-                            self.advance();
-                        }
-                        if self.peek_token() == ";" {
-                            self.advance();
-                        }
-                    }
-                }
-
-                eprintln!("[DEBUG] Adding if statement to struct");
-                contents.push(StructContent::Statement(Box::new(if_stmt)));
-                continue;
-            }
-
-            // Handle while loops inside structs
-            if token_lower == "while" {
-                eprintln!("[DEBUG] Parsing while loop in struct");
-                self.push_context("while loop");
-                let while_stmt = self.parse_while()?;
-                self.pop_context();
-
-                eprintln!("[DEBUG] Adding while statement to struct");
-                contents.push(StructContent::Statement(Box::new(while_stmt)));
-                continue;
-            }
-
-            // Handle switch statements inside structs
-            if token_lower == "switch" {
-                eprintln!("[DEBUG] Parsing switch statement in struct");
-                self.push_context("switch statement");
-                let switch_stmt = self.parse_switch()?;
-                self.pop_context();
-
-                eprintln!("[DEBUG] Adding switch statement to struct");
-                contents.push(StructContent::Statement(Box::new(switch_stmt)));
-                continue;
-            }
-
-            // Handle expression statements inside structs (like reassignments)
-            if self.is_expression_statement_start() {
-                eprintln!("[DEBUG] Parsing expression statement in struct");
-                self.push_context("expression statement");
-                match self.parse_expression_statement()? {
-                    Some(s) => contents.push(StructContent::Statement(Box::new(s))),
-                    None => (),
-                }
-                self.pop_context();
-
-                continue;
-            }
-
-            eprintln!("[DEBUG] Parsing struct field");
-            let field = self.parse_struct_field()?;
-            contents.push(StructContent::Field(field));
+        while self.peek_token()? != &Punctuator::RBrace && !self.is_eof() {
+            let decl = self.parse_declaration()?;
+            items.push(self.into_struct_content(decl)?);
         }
 
-        Ok(contents)
+        Ok(items)
     }
 
-    fn parse_struct_field(&mut self) -> Result<StructField, String> {
-        let base_ty = self.parse_type().map_err(|e| {
-            format!(
-                "{}. Context: parsing struct field type{}",
-                e,
-                self.get_context()
-            )
-        })?;
-
-        let name = self.peek_token().to_string();
-        eprintln!("[DEBUG] Struct field name: {}", name);
-        self.advance();
-
-        let mut ty = base_ty;
-        while self.peek_token() == "[" {
-            self.advance();
-
-            let size = if self.peek_token() != "]" {
-                Some(Box::new(self.parse_expr().map_err(|e| {
-                    format!(
-                        "{}. Context: parsing array size for field '{}'{}",
-                        e,
-                        name,
-                        self.get_context()
-                    )
-                })?))
-            } else {
-                None
-            };
-
-            self.expect("]").map_err(|e| {
-                format!(
-                    "{}. Context: in array definition for field '{}'{}",
-                    e,
-                    name,
-                    self.get_context()
-                )
-            })?;
-
-            ty = DataType::Array(Box::new(ty), size);
+    fn into_struct_content(&self, decl: Statement) -> Result<StructItem, String> {
+        match decl {
+            Statement::VarDecl {
+                ident,
+                ty,
+                value: None,
+                local: false,
+            } => Ok(StructItem::Field(StructField { ident, ty })),
+            _ => Ok(StructItem::Statement(Box::new(decl))),
         }
-
-        let mut condition = None;
-
-        if self.peek_token().to_lowercase() == "if" {
-            self.advance();
-
-            condition = Some(self.parse_condition().map_err(|e| {
-                format!(
-                    "{}. Context: parsing field condition{}",
-                    e,
-                    self.get_context()
-                )
-            })?);
-        }
-
-        if self.peek_token() == "<" {
-            self.skip_until(">")?;
-        }
-
-        if self.peek_token() == ";" {
-            self.advance();
-        } else if self.peek_token() != "}"
-            && !self.is_eof()
-            && self.peek_token().to_lowercase() != "local"
-            && self.peek_token().to_lowercase() != "if"
-            && self.peek_token().to_lowercase() != "else"
-            && self.peek_token().to_lowercase() != "while"
-            && self.peek_token().to_lowercase() != "switch"
-        {
-            return Err(format!(
-                "Expected ';' but found '{}' at token position {} (line {}). Context: struct field type={}, name={}{}",
-                self.peek_token(),
-                self.pos,
-                self.get_line_number(),
-                match &ty {
-                    DataType::Custom(c) => c.clone(),
-                    _ => format!("{:?}", ty),
-                },
-                name,
-                self.get_context()
-            ));
-        }
-
-        return Ok(StructField {
-            ident: name,
-            ty,
-            condition,
-            comment: None,
-        });
     }
 
-    fn is_expression_statement_start(&self) -> bool {
-        // Look ahead to see if this is an expression statement
-        // Expression statements typically start with an identifier followed by = or (
-        let token = self.peek_token();
+    // fn parse_struct_field(&mut self) -> Result<StructField, String> {
+    //     let base_ty = self.parse_type().map_err(|e| {
+    //         format!(
+    //             "{}. Context: parsing struct field type{}",
+    //             e,
+    //             self.get_context()
+    //         )
+    //     })?;
 
-        // Check if it's a control flow keyword
-        let lower = token.to_lowercase();
-        if matches!(
-            lower.as_str(),
-            "if" | "else"
-                | "while"
-                | "for"
-                | "switch"
-                | "case"
-                | "default"
-                | "return"
-                | "break"
-                | "continue"
-        ) {
-            eprintln!(
-                "[DEBUG] is_expression_statement_start: token '{}' is a control flow keyword, returning false",
-                lower
-            );
-            return false;
-        }
+    //     let name = self
+    //         .peek_token()?
+    //         .ident()
+    //         .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
+    //         .to_string();
+    //     eprintln!("[DEBUG] Struct field name: {}", name);
+    //     self.advance();
 
-        // Check if it's a type keyword
-        if self.is_type_start(token) {
-            eprintln!(
-                "[DEBUG] is_expression_statement_start: token '{}' is a type keyword, returning false",
-                lower
-            );
-            return false;
-        }
+    //     let mut ty = base_ty;
+    //     while self.peek_token()? == &Punctuator::LBracket {
+    //         self.advance();
 
-        // Check if it starts with a valid identifier character
-        if token
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_alphabetic() || c == '_')
-        {
-            // Look ahead for = or (
-            if self.pos + 1 < self.tokens.len() {
-                let next_pos = self.pos + 1;
-                // Skip whitespace to find next meaningful token
-                let mut check_pos = next_pos;
-                while check_pos < self.tokens.len()
-                    && (self.tokens[check_pos] == " "
-                        || self.tokens[check_pos] == "\t"
-                        || self.tokens[check_pos] == "\n")
-                {
-                    check_pos += 1;
-                }
+    //         let size = if self.peek_token()? != &Punctuator::RBracket {
+    //             Some(Box::new(self.parse_expr().map_err(|e| {
+    //                 format!(
+    //                     "{}. Context: parsing array size for field '{}'{}",
+    //                     e,
+    //                     name,
+    //                     self.get_context()
+    //                 )
+    //             })?))
+    //         } else {
+    //             None
+    //         };
 
-                if check_pos < self.tokens.len() {
-                    let next_token = &self.tokens[check_pos];
-                    let result = next_token == "=" || next_token == "(";
-                    eprintln!(
-                        "[DEBUG] is_expression_statement_start: token '{}' followed by '{}', returning {}",
-                        token, next_token, result
-                    );
-                    return result;
-                }
-            }
-        }
+    //         self.expect(Punctuator::RBracket).map_err(|e| {
+    //             format!(
+    //                 "{}. Context: in array definition for field '{}'{}",
+    //                 e,
+    //                 name,
+    //                 self.get_context()
+    //             )
+    //         })?;
 
-        eprintln!(
-            "[DEBUG] is_expression_statement_start: token '{}' is not an expression statement start",
-            token
-        );
-        false
-    }
+    //         ty = DataType::Array(Box::new(ty), size);
+    //     }
 
-    fn parse_condition(&mut self) -> Result<Expression, String> {
-        self.expect("(")?;
+    //     let mut condition = None;
 
-        let expr = self.parse_expr()?;
+    //     if self.peek_token()? == &Keyword::If {
+    //         self.advance();
 
-        self.expect(")")?;
-        Ok(expr)
-    }
+    //         condition = Some(self.parse_condition().map_err(|e| {
+    //             format!(
+    //                 "{}. Context: parsing field condition{}",
+    //                 e,
+    //                 self.get_context()
+    //             )
+    //         })?);
+    //     }
+
+    //     if self.peek_token()? == &Punctuator::LAngledBracket {
+    //         self.skip_until(Punctuator::RAngledBracket)?;
+    //     }
+
+    //     let next = self.peek_token()?;
+    //     if next == &Punctuator::Semicolon {
+    //         self.advance();
+    //     } else if next != &Punctuator::RBrace
+    //         && next != &Keyword::Local
+    //         && next != &Keyword::If
+    //         && next != &Keyword::Else
+    //         && next != &Keyword::While
+    //         && next != &Keyword::Switch
+    //     {
+    //         return Err(format!(
+    //             "Expected ';' but found '{}' at token position {}. Context: struct field type={}, name={}{}",
+    //             self.peek_token(),
+    //             self.pos,
+    //             match &ty {
+    //                 DataType::Custom(c) => c.clone(),
+    //                 _ => format!("{:?}", ty),
+    //             },
+    //             name,
+    //             self.get_context()
+    //         ));
+    //     }
+
+    //     return Ok(StructField { ident: name, ty });
+    // }
+
+    // fn is_expression_statement_start(&self) -> bool {
+    //     matches!(self.peek_token(), Ok(res) if matches!(res, TokenKind::Ident(_)))
+    // }
+
+    // fn parse_condition(&mut self) -> Result<Expression, String> {
+    //     self.expect(Punctuator::LParen)?;
+
+    //     let expr = self.parse_expr()?;
+
+    //     self.expect(Punctuator::RParen)?;
+    //     Ok(expr)
+    // }
 
     fn parse_enum(&mut self) -> Result<Statement, String> {
-        self.expect("enum")?;
+        self.expect(Keyword::Enum)?;
 
-        let name = self.peek_token().to_string();
+        let name = self
+            .peek_token()?
+            .ident()
+            .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
+            .to_string();
         eprintln!("[DEBUG] Parsing enum: {}", name);
         self.advance();
 
-        if self.peek_token() == ":" {
+        if self.peek_token()? == &Punctuator::Colon {
             self.advance();
 
             self.parse_type()?;
         }
 
-        self.expect("{")?;
+        self.expect(Punctuator::LBrace)?;
 
         let mut variants = Vec::new();
 
-        while self.peek_token() != "}" && !self.is_eof() {
-            if self.peek_token() == "}" {
+        while self.peek_token()? != &Punctuator::RBrace && !self.is_eof() {
+            if self.peek_token()? == &Punctuator::RBrace {
                 break;
             }
 
-            let variant_name = self.peek_token().to_string();
+            let variant_name = self
+                .peek_token()?
+                .ident()
+                .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
+                .to_string();
             eprintln!("[DEBUG] Enum variant: {}", variant_name);
             self.advance();
 
-            let value = if self.peek_token() == "=" {
+            let value = if self.peek_token()? == &Punctuator::Assign {
                 self.advance();
 
                 Some(self.parse_literal()?.parse::<i64>().unwrap_or(0))
@@ -841,14 +510,14 @@ impl Parser {
 
             variants.push((variant_name, value));
 
-            if self.peek_token() == "," {
+            if self.peek_token()? == &Punctuator::Comma {
                 self.advance();
             }
         }
 
-        self.expect("}")?;
+        self.expect(Punctuator::RBrace)?;
 
-        self.expect(";")?;
+        self.expect(Punctuator::Semicolon)?;
 
         Ok(Statement::EnumDef {
             ident: name,
@@ -858,7 +527,7 @@ impl Parser {
 
     fn parse_var_decl(&mut self, local: bool) -> Result<Statement, String> {
         if local {
-            self.expect("local")?;
+            self.expect(Keyword::Local)?;
         }
 
         let base_ty = self.parse_type().map_err(|e| {
@@ -869,15 +538,19 @@ impl Parser {
             )
         })?;
 
-        let name = self.peek_token().to_string();
+        let name = self
+            .peek_token()?
+            .ident()
+            .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
+            .to_string();
         eprintln!("[DEBUG] Variable name: {}", name);
         self.advance();
 
         let mut ty = base_ty;
-        while self.peek_token() == "[" {
+        while self.peek_token()? == &Punctuator::LBracket {
             self.advance();
 
-            let size = if self.peek_token() != "]" {
+            let size = if self.peek_token()? != &Punctuator::RBracket {
                 Some(Box::new(self.parse_expr().map_err(|e| {
                     format!(
                         "{}. Context: parsing array size for variable '{}'{}",
@@ -890,12 +563,12 @@ impl Parser {
                 None
             };
 
-            self.expect("]")?;
+            self.expect(Punctuator::RBracket)?;
 
             ty = DataType::Array(Box::new(ty), size);
         }
 
-        let value = if self.peek_token() == "=" {
+        let value = if self.peek_token()? == &Punctuator::Assign {
             self.advance();
 
             Some(self.parse_expr().map_err(|e| {
@@ -910,7 +583,11 @@ impl Parser {
             None
         };
 
-        if self.peek_token() == ";" {
+        if self.peek_token()? == &Punctuator::LAngledBracket {
+            self.skip_until(Punctuator::RAngledBracket)?;
+        }
+
+        if self.peek_token()? == &Punctuator::Semicolon {
             self.advance();
         }
 
@@ -922,18 +599,29 @@ impl Parser {
         })
     }
 
+    fn try_parse_var_decl(&mut self, local: bool) -> Result<Statement, String> {
+        let pos = self.pos;
+        match self.parse_var_decl(local) {
+            Ok(d) => Ok(d),
+            Err(e) => {
+                self.pos = pos;
+                Err(e)
+            }
+        }
+    }
+
     fn parse_if(&mut self) -> Result<Statement, String> {
-        self.expect("if")?;
-        self.expect("(")?;
+        self.expect(Keyword::If)?;
+        self.expect(Punctuator::LParen)?;
 
         eprintln!("[DEBUG] Parsing if condition");
         let condition = self
             .parse_expr()
             .map_err(|e| format!("{}. Context: parsing if condition{}", e, self.get_context()))?;
 
-        self.expect(")")?;
+        self.expect(Punctuator::RParen)?;
 
-        let then_block = if self.peek_token() == "{" {
+        let then_block = if self.peek_token()? == &Punctuator::LBrace {
             eprintln!("[DEBUG] Entering if block");
             self.advance();
 
@@ -941,19 +629,19 @@ impl Parser {
             let block = self.parse_block()?;
             self.pop_context();
 
-            self.expect("}")?;
+            self.expect(Punctuator::RBrace)?;
             block
         } else {
             eprintln!("[DEBUG] Entering one-line if");
             // self.advance();
 
-            vec![self.parse_statement()?]
+            vec![self.parse_declaration()?]
         };
 
-        let else_block = if self.peek_token().to_lowercase() == "else" {
+        let else_block = if self.peek_token()? == &Keyword::Else {
             self.advance();
 
-            if self.peek_token() == "{" {
+            if self.peek_token()? == &Punctuator::LBrace {
                 eprintln!("[DEBUG] Entering else block");
                 self.advance();
 
@@ -961,10 +649,10 @@ impl Parser {
                 let block = self.parse_block()?;
                 self.pop_context();
 
-                self.expect("}")?;
+                self.expect(Punctuator::RBrace)?;
                 Some(block)
             } else {
-                Some(vec![self.parse_statement()?])
+                Some(vec![self.parse_declaration()?])
             }
         } else {
             None
@@ -972,15 +660,15 @@ impl Parser {
 
         Ok(Statement::If {
             condition,
-            then_block,
-            else_block,
+            then_block: Block(then_block),
+            else_block: else_block.map(|b| Block(b)),
         })
     }
 
     fn parse_while(&mut self) -> Result<Statement, String> {
-        self.expect("while")?;
+        self.expect(Keyword::While)?;
 
-        self.expect("(")?;
+        self.expect(Punctuator::LParen)?;
 
         eprintln!("[DEBUG] Parsing while condition");
         let condition = self.parse_expr().map_err(|e| {
@@ -991,9 +679,9 @@ impl Parser {
             )
         })?;
 
-        self.expect(")")?;
+        self.expect(Punctuator::RParen)?;
 
-        let body = if self.peek_token() == "{" {
+        let body = if self.peek_token()? == &Punctuator::LBrace {
             eprintln!("[DEBUG] Entering while block");
             self.advance();
 
@@ -1003,71 +691,56 @@ impl Parser {
 
             eprintln!(
                 "[DEBUG] About to expect closing brace, current token: '{}'",
-                self.peek_token()
+                self.peek_token()?
             );
-            self.expect("}")?;
+            self.expect(Punctuator::RBrace)?;
             eprintln!("[DEBUG] Exiting while block");
             block
         } else {
             vec![self.parse_statement()?]
         };
 
-        Ok(Statement::While { condition, body })
+        Ok(Statement::While {
+            condition,
+            body: Block(body),
+        })
     }
 
     fn parse_block(&mut self) -> Result<Vec<Statement>, String> {
-        let mut statements = Vec::new();
+        let mut stmts = Vec::new();
 
-        while self.peek_token() != "}" && !self.is_eof() {
-            if self.peek_token() == "}" || self.is_eof() {
-                eprintln!(
-                    "[DEBUG] parse_block: stopping, current token: '{}', eof: {}",
-                    self.peek_token(),
-                    self.is_eof()
-                );
-                break;
-            }
-
-            statements.push(self.parse_statement()?);
+        while self.peek_token()? != &Punctuator::RBrace {
+            stmts.push(self.parse_declaration()?);
         }
 
-        eprintln!(
-            "[DEBUG] parse_block finished with {} statements, current token: '{}'",
-            statements.len(),
-            self.peek_token()
-        );
-        Ok(statements)
+        Ok(stmts)
     }
 
     fn parse_switch(&mut self) -> Result<Statement, String> {
-        self.expect("switch")?;
+        self.expect(Keyword::Switch)?;
 
-        self.expect("(")?;
+        self.expect(Punctuator::LParen)?;
 
         eprintln!("[DEBUG] Parsing switch expression");
         let expr = self.parse_expr()?;
 
-        self.expect(")")?;
-
-        self.expect("{")?;
+        self.expect(Punctuator::RParen)?;
+        self.expect(Punctuator::LBrace)?;
 
         eprintln!("[DEBUG] Entering switch block");
         let mut cases = Vec::new();
 
-        while self.peek_token() != "}" && !self.is_eof() {
-            if self.peek_token() == "}" {
-                break;
-            }
+        while self.peek_token()? != &Punctuator::RBrace {
+            // not really sure what to do in this case except clone (either way it's cheap)
+            let token = self.peek_token()?.clone();
 
-            let token_lower = self.peek_token().to_lowercase();
-
-            if token_lower == "case" || token_lower == "default" {
-                if token_lower == "case" {
+            if token == Keyword::Case || token == Keyword::Default {
+                if token == Keyword::Case {
                     eprintln!("[DEBUG] Parsing case label");
                     self.advance();
 
                     // Skip the case value
-                    while self.peek_token() != ":" && !self.is_eof() {
+                    while self.peek_token()? != &Punctuator::Colon {
                         self.advance();
                     }
                 } else {
@@ -1075,129 +748,112 @@ impl Parser {
                     self.advance();
                 }
 
-                if self.peek_token() == ":" {
+                if self.peek_token()? == &Punctuator::Colon {
                     self.advance();
                 }
 
-                // Parse statements in case
                 let mut case_body = Vec::new();
-                while self.peek_token() != "case"
-                    && self.peek_token() != "default"
-                    && self.peek_token() != "}"
-                    && !self.is_eof()
+                while self.peek_token()? != &Keyword::Case
+                    && self.peek_token()? != &Keyword::Default
+                    && self.peek_token()? != &Punctuator::RBrace
                 {
-                    if self.peek_token() == "case"
-                        || self.peek_token() == "default"
-                        || self.peek_token() == "}"
+                    if self.peek_token()? == &Keyword::Case
+                        || self.peek_token()? == &Keyword::Default
+                        || self.peek_token()? == &Punctuator::RBrace
                     {
                         break;
                     }
-                    case_body.push(self.parse_statement()?);
+                    case_body.push(self.parse_declaration()?);
                 }
-                cases.push(case_body);
+                cases.push(Block(case_body));
             } else {
                 break;
             }
         }
 
-        self.expect("}")?;
+        eprintln!("expecting brace");
+        self.expect(Punctuator::RBrace)?;
         eprintln!("[DEBUG] Exiting switch block");
 
         Ok(Statement::Switch { expr, cases })
     }
 
+    fn parse_return(&mut self) -> Result<Statement, String> {
+        eprintln!("[DEBUG] Parsing return statement");
+        self.advance();
+
+        let value = if self.peek_token()? != &Punctuator::Semicolon {
+            Some(self.parse_expr().map_err(|e| {
+                format!("{}. Context: parsing return value{}", e, self.get_context())
+            })?)
+        } else {
+            None
+        };
+
+        if self.peek_token()? == &Punctuator::Semicolon {
+            self.advance();
+        }
+        Ok(Statement::Return(value))
+    }
+
     fn parse_statement(&mut self) -> Result<Statement, String> {
-        let token = self.peek_token().to_lowercase();
+        let token = self.peek_token()?;
         eprintln!("[DEBUG] parse_statement: token = '{}'", token);
 
-        match token.as_str() {
-            "if" => {
-                self.push_context("if statement");
-                let result = self.parse_if();
-                self.pop_context();
-                result
-            }
-            "while" => {
-                self.push_context("while loop");
-                let result = self.parse_while();
-                self.pop_context();
-                result
-            }
-            "switch" => {
-                self.push_context("switch statement");
-                eprintln!("[DEBUG] parse_statement: parsing switch statement");
-                let result = self.parse_switch();
-                self.pop_context();
-                result
-            }
-            "return" => {
-                eprintln!("[DEBUG] Parsing return statement");
+        match token {
+            TokenKind::Keyword(Keyword::If) => self.parse_if(),
+            TokenKind::Keyword(Keyword::While) => self.parse_while(),
+            TokenKind::Keyword(Keyword::Switch) => self.parse_switch(),
+            TokenKind::Keyword(Keyword::Return) => self.parse_return(),
+            TokenKind::Punc(Punctuator::LBrace) => {
                 self.advance();
-
-                let value = if self.peek_token() != ";" {
-                    Some(self.parse_expr().map_err(|e| {
-                        format!("{}. Context: parsing return value{}", e, self.get_context())
-                    })?)
-                } else {
-                    None
-                };
-                dbg!(&value);
-
-                if self.peek_token() == ";" {
-                    self.advance();
-                }
-                Ok(Statement::Return(value))
+                let block = self.parse_block()?;
+                self.expect(Punctuator::RBrace)?;
+                Ok(Statement::Block(Block(block)))
             }
-            "local" => {
-                self.push_context("local variable");
-                let result = self.parse_var_decl(true);
-                self.pop_context();
-                result
-            }
-            _ if self.is_type_start(&token) => {
-                eprintln!("[DEBUG] parse_statement: parsing var decl");
-                self.parse_var_decl(false)
-            }
-            _ => {
-                eprintln!(
-                    "[DEBUG] parse_statement: parsing expression statement, token: '{}'",
-                    token
-                );
-                match self.parse_expression_statement()? {
-                    Some(s) => Ok(s),
-                    None => Ok(Statement::FunctionCall(String::new(), vec![])),
-                }
-            }
+            _ => self.parse_expression_statement(),
         }
     }
 
     fn parse_type(&mut self) -> Result<DataType, String> {
-        let token = self.peek_token().to_lowercase();
+        match self.peek_token()? {
+            TokenKind::Keyword(Keyword::Struct) => {
+                self.advance();
 
-        if token == "unsigned" {
+                let name = self.peek_token()?.to_string();
+                self.advance();
+
+                self.expect(Punctuator::LBrace)?;
+                let body = self.parse_struct_body()?;
+                self.expect(Punctuator::RBrace)?;
+                Ok(DataType::Struct(name, body))
+            }
+
+            _ => self.parse_basic_type(),
+        }
+    }
+
+    fn parse_basic_type(&mut self) -> Result<DataType, String> {
+        let token = self.peek_token()?;
+
+        if token == &Keyword::Unsigned {
             self.advance();
 
-            let next_token = self.peek_token().to_lowercase();
-            let base_type = match next_token.as_str() {
-                "char" => {
+            let next_token = self.peek_token()?;
+            let base_type = match next_token {
+                TokenKind::Keyword(Keyword::DataType(dt)) => {
+                    let d = dt.clone();
                     self.advance();
-                    DataType::UChar
-                }
-                "short" => {
-                    self.advance();
-                    DataType::UShort
-                }
-                "int" => {
-                    self.advance();
-                    DataType::UInt
-                }
-                "long" => {
-                    self.advance();
-                    if self.peek_token().to_lowercase() == "long" {
-                        self.advance();
-                        DataType::UQuad
-                    } else {
-                        DataType::ULong
+                    match self.peek_token()? {
+                        TokenKind::Keyword(Keyword::DataType(second)) => {
+                            if second == &DataType::Long {
+                                self.advance();
+                                DataType::UQuad
+                            } else {
+                                DataType::ULong
+                            }
+                        }
+                        _ => d,
                     }
                 }
                 _ => DataType::UInt,
@@ -1205,51 +861,35 @@ impl Parser {
             return Ok(base_type);
         }
 
-        if token == "signed" {
+        if token == &Keyword::Signed {
             self.advance();
 
-            let next_token = self.peek_token().to_lowercase();
-            let base_type = match next_token.as_str() {
-                "char" => {
+            let next_token = self.peek_token()?;
+            let base_type = match next_token {
+                TokenKind::Keyword(Keyword::DataType(dt)) => {
+                    let d = dt.clone();
                     self.advance();
-                    DataType::Char
-                }
-                "short" => {
-                    self.advance();
-                    DataType::Short
-                }
-                "int" => {
-                    self.advance();
-                    DataType::Int
-                }
-                "long" => {
-                    self.advance();
-                    if self.peek_token().to_lowercase() == "long" {
-                        self.advance();
-                        DataType::Quad
-                    } else {
-                        DataType::Long
+                    match self.peek_token()? {
+                        TokenKind::Keyword(Keyword::DataType(second)) => {
+                            if second == &DataType::Long {
+                                self.advance();
+                                DataType::UQuad
+                            } else {
+                                DataType::ULong
+                            }
+                        }
+                        _ => d,
                     }
                 }
-                _ => DataType::Int,
+                _ => DataType::UInt,
             };
             return Ok(base_type);
         }
 
-        let base_type = match token.as_str() {
-            "char" => DataType::Char,
-            "uchar" => DataType::UChar,
-            "short" => DataType::Short,
-            "ushort" => DataType::UShort,
-            "int" => DataType::Int,
-            "uint" => DataType::UInt,
-            "long" => DataType::Long,
-            "ulong" => DataType::ULong,
-            "quad" => DataType::Quad,
-            "uquad" => DataType::UQuad,
-            "float" => DataType::Float,
-            "double" => DataType::Double,
-            _ => DataType::Custom(token.to_string()),
+        let base_type = match token {
+            TokenKind::Keyword(Keyword::DataType(dt)) => dt.clone(),
+            TokenKind::Ident(i) => DataType::Custom(i.clone()),
+            t => return Err(format!("Nonsense datatype {}", t)),
         };
 
         self.advance();
@@ -1264,12 +904,12 @@ impl Parser {
     fn parse_ternary_expr(&mut self) -> Result<Expression, String> {
         let expr = self.parse_binary_expr(0)?;
 
-        if self.peek_token() == "?" {
+        if self.peek_token()? == &Punctuator::Question {
             self.advance();
 
             let true_expr = self.parse_expr()?;
 
-            self.expect(":")?;
+            self.expect(Punctuator::Colon)?;
 
             let false_expr = self.parse_expr()?;
             return Ok(Expression::BinaryOp(
@@ -1289,12 +929,14 @@ impl Parser {
     fn parse_binary_expr(&mut self, min_prec: i32) -> Result<Expression, String> {
         let mut left = self.parse_primary_expr()?;
 
-        while let Some(prec) = self.get_precedence(self.peek_token()) {
+        while let TokenKind::Punc(p) = self.peek_token()?
+            && let Some(prec) = self.get_precedence(p)
+        {
             if prec < min_prec {
                 break;
             }
 
-            let op = self.peek_token().to_string();
+            let op = p.to_string();
             self.advance();
 
             let right = self.parse_binary_expr(prec + 1).map_err(|e| {
@@ -1312,96 +954,115 @@ impl Parser {
     }
 
     fn parse_primary_expr(&mut self) -> Result<Expression, String> {
-        let token = self.peek_token();
+        let token = self.peek_token()?;
 
-        if token == "(" {
-            self.advance();
-
-            // Check if this is a cast: (type)expression
-            let saved_pos = self.pos;
-            let is_cast = self.try_parse_cast();
-
-            if is_cast {
-                // This is a cast, parse the type
-                self.pos = saved_pos;
-                let cast_type = Box::new(self.parse_type()?);
-
-                self.expect(")")?;
-
-                // Parse the expression being cast
-                let expr = Box::new(self.parse_primary_expr()?);
-                eprintln!("[DEBUG] Parsed cast to type {:?}", cast_type);
-
-                return Ok(Expression::Cast(cast_type, expr));
-            } else {
-                // Regular parenthesized expression
-                let expr = self.parse_expr()?;
-
-                self.expect(")")?;
-                Ok(expr)
-            }
-        } else if token.starts_with("\"") || token.starts_with("'") {
-            let literal = token.to_string();
-            self.advance();
-            Ok(Expression::Literal(literal))
-        } else if token.chars().next().map_or(false, |c| c.is_ascii_digit()) {
-            let literal = token.to_string();
-            self.advance();
-            Ok(Expression::Literal(literal))
-        } else if token == "!" || token == "-" || token == "~" {
-            let op = token.to_string();
-            self.advance();
-
-            let expr = self.parse_primary_expr()?;
-            Ok(Expression::UnaryOp(op, Box::new(expr)))
-        } else {
-            let var = token.to_string();
-            self.advance();
-
-            if self.peek_token() == "(" {
+        match token {
+            TokenKind::Punc(Punctuator::LParen) => {
                 self.advance();
 
-                let mut args = Vec::new();
-                while self.peek_token() != ")" && !self.is_eof() {
-                    args.push(self.parse_expr()?);
+                let saved_pos = self.pos;
+                let is_cast = self.is_cast();
 
-                    if self.peek_token() == "," {
-                        self.advance();
-                    }
+                if is_cast {
+                    self.pos = saved_pos;
+                    let cast_type = Box::new(self.parse_type()?);
+
+                    self.expect(Punctuator::RParen)?;
+
+                    // Parse the expression being cast
+                    let expr = Box::new(self.parse_primary_expr()?);
+                    eprintln!("[DEBUG] Parsed cast to type {:?}", cast_type);
+
+                    return Ok(Expression::Cast(cast_type, expr));
+                } else {
+                    // Regular parenthesized expression
+                    let expr = self.parse_expr()?;
+
+                    self.expect(Punctuator::RParen)?;
+                    Ok(expr)
                 }
-                self.expect(")")?;
-                Ok(Expression::FunctionCall(var, args))
-            } else if self.peek_token() == "[" {
+            }
+            TokenKind::Char(c) => {
+                let char = c.to_string();
+                self.advance();
+                Ok(Expression::Literal(char))
+            }
+            TokenKind::String(s) => {
+                let str = s.to_string();
+                self.advance();
+                Ok(Expression::Literal(str))
+            }
+            TokenKind::Int(i) => {
+                let int = i.to_string();
+                self.advance();
+                Ok(Expression::Literal(int))
+            }
+            TokenKind::Float(f) => {
+                let float = f.to_string();
+                self.advance();
+                Ok(Expression::Literal(float))
+            }
+            TokenKind::Punc(
+                Punctuator::Plus | Punctuator::Minus | Punctuator::BitNot | Punctuator::Not,
+            ) => {
+                let p = token.to_string();
+                self.advance();
+                let expr = self.parse_primary_expr()?;
+                Ok(Expression::UnaryOp(p, Box::new(expr)))
+            }
+            _ => {
+                let var = token.to_string();
                 self.advance();
 
-                let index = self.parse_expr()?;
+                if self.peek_token()? == &Punctuator::LParen {
+                    self.advance();
 
-                self.expect("]")?;
-                Ok(Expression::ArrayAccess(
-                    Box::new(Expression::Identifier(var)),
-                    Box::new(index),
-                ))
-            } else if self.peek_token() == "." {
-                self.advance();
+                    let mut args = Vec::new();
+                    while self.peek_token()? != &Punctuator::RParen && !self.is_eof() {
+                        args.push(self.parse_expr()?);
 
-                let field = self.peek_token().to_string();
-                self.advance();
-                Ok(Expression::FieldAccess(
-                    Box::new(Expression::Identifier(var)),
-                    field,
-                ))
-            } else {
-                Ok(Expression::Identifier(var))
+                        if self.peek_token()? == &Punctuator::Comma {
+                            self.advance();
+                        }
+                    }
+                    self.expect(Punctuator::RParen)?;
+                    Ok(Expression::Call(var, args))
+                } else if self.peek_token()? == &Punctuator::LBracket {
+                    self.advance();
+
+                    let index = self.parse_expr()?;
+
+                    self.expect(Punctuator::RBracket)?;
+                    Ok(Expression::ArrayAccess(
+                        Box::new(Expression::Identifier(var)),
+                        Box::new(index),
+                    ))
+                } else if self.peek_token()? == &Punctuator::Dot {
+                    self.advance();
+
+                    let field = self.peek_token()?.to_string();
+                    self.advance();
+                    Ok(Expression::FieldAccess(
+                        Box::new(Expression::Identifier(var)),
+                        field,
+                    ))
+                } else {
+                    Ok(Expression::Identifier(var))
+                }
             }
         }
     }
 
-    fn try_parse_cast(&mut self) -> bool {
+    fn is_cast(&mut self) -> bool {
         // Try to determine if this is a cast by looking for type keywords
-        let token = self.peek_token().to_lowercase();
+        let token = if let Ok(t) = self.peek_token() {
+            t
+        } else {
+            return false;
+        };
 
         // Check if it's a known type
-        if !self.is_type_start(&token) {
+        if !self.is_type_start(token) {
             return false;
         }
 
@@ -1415,7 +1076,7 @@ impl Parser {
         }
 
         // Check if followed by )
-        let is_cast = self.peek_token() == ")";
+        let is_cast = self.peek_token().unwrap() == &Punctuator::RParen;
 
         // Restore position
         self.pos = saved_pos;
@@ -1423,88 +1084,81 @@ impl Parser {
         is_cast
     }
 
-    fn parse_function_call(&mut self) -> Result<(), String> {
-        let _name = self.peek_token().to_string();
-        self.advance();
+    // fn parse_function_call(&mut self) -> Result<(), String> {
+    //     let _name = self.peek_token()?.to_string();
+    //     self.advance();
 
-        if self.peek_token() == "(" {
-            self.advance();
-            let mut paren_depth = 1;
-            while paren_depth > 0 && !self.is_eof() {
-                match self.peek_token() {
-                    "(" => paren_depth += 1,
-                    ")" => paren_depth -= 1,
-                    _ => {}
-                }
-                if paren_depth > 0 {
-                    self.advance();
-                }
-            }
-            self.advance();
-        }
+    //     if self.peek_token()? == &Punctuator::LParen {
+    //         self.advance();
+    //         let mut paren_depth = 1;
+    //         while paren_depth > 0 && !self.is_eof() {
+    //             match self.peek_token()? {
+    //                 Punctuator::LParen => paren_depth += 1,
+    //                 Punctuator::RParen => paren_depth -= 1,
+    //                 _ => {}
+    //             }
+    //             if paren_depth > 0 {
+    //                 self.advance();
+    //             }
+    //         }
+    //         self.advance();
+    //     }
 
-        if self.peek_token() == ";" {
-            self.advance();
-        }
-        Ok(())
-    }
+    //     if self.peek_token()? == &Punctuator::Semicolon {
+    //         self.advance();
+    //     }
+    //     Ok(())
+    // }
 
     fn parse_literal(&mut self) -> Result<String, String> {
-        let literal = self.peek_token().to_string();
+        let literal = self.peek_token()?.to_string();
         self.advance();
 
         Ok(literal)
     }
 
-    fn get_precedence(&self, op: &str) -> Option<i32> {
+    fn get_precedence(&self, op: &Punctuator) -> Option<i32> {
         match op {
-            "||" => Some(1),
-            "&&" => Some(2),
-            "|" => Some(3),
-            "^" => Some(4),
-            "&" => Some(5),
-            "==" | "!=" => Some(6),
-            "<" | ">" | "<=" | ">=" => Some(7),
-            "+" | "-" => Some(8),
-            "*" | "/" | "%" => Some(9),
-            "=" => Some(0),
+            Punctuator::Or => Some(1),
+            Punctuator::And => Some(2),
+            Punctuator::BitOr => Some(3),
+            Punctuator::BitXor => Some(4),
+            Punctuator::Ampersand => Some(5),
+            Punctuator::Equal | Punctuator::NotEqual => Some(6),
+            Punctuator::LAngledBracket
+            | Punctuator::RAngledBracket
+            | Punctuator::LessEqual
+            | Punctuator::GreaterEqual => Some(7),
+            Punctuator::Plus | Punctuator::Minus => Some(8),
+            Punctuator::Asterisk | Punctuator::Div | Punctuator::Mod => Some(9),
+            Punctuator::Assign => Some(0),
             _ => None,
         }
     }
 
-    fn is_type_start(&self, token: &str) -> bool {
-        let lower = token.to_lowercase();
-        matches!(
-            lower.as_str(),
-            "char"
-                | "uchar"
-                | "short"
-                | "ushort"
-                | "int"
-                | "uint"
-                | "long"
-                | "ulong"
-                | "quad"
-                | "uquad"
-                | "float"
-                | "double"
-                | "unsigned"
-                | "signed"
-        )
+    fn is_type_start(&self, token: &TokenKind) -> bool {
+        matches!(token, TokenKind::Keyword(Keyword::DataType(_)))
     }
 
-    fn skip_until(&mut self, end_marker: &str) -> Result<(), String> {
-        while self.peek_token() != end_marker && !self.is_eof() {
+    fn skip_until<T: Into<TokenKind>>(&mut self, end_marker: T) -> Result<(), String> {
+        let end = end_marker.into();
+        while self.peek_token()? != &end && !self.is_eof() {
             self.advance();
         }
-        if self.peek_token() == end_marker {
+        if self.peek_token()? == &end {
             self.advance();
         }
         Ok(())
     }
 
-    fn peek_token(&self) -> &str {
-        self.tokens.get(self.pos).map(|s| s.as_str()).unwrap_or("")
+    fn peek_token(&self) -> Result<&TokenKind, String> {
+        self.peek_token_after(0)
+    }
+
+    fn peek_token_after(&self, after: usize) -> Result<&TokenKind, String> {
+        self.tokens
+            .get(self.pos + after)
+            .ok_or_else(|| format!("EOF at position {}", self.pos))
     }
 
     fn advance(&mut self) {
@@ -1513,26 +1167,29 @@ impl Parser {
         }
     }
 
-    fn expect(&mut self, expected: &str) -> Result<(), String> {
+    fn expect<T>(&mut self, expected: T) -> Result<(), String>
+    where
+        T: Into<TokenKind>,
+    {
+        let token: TokenKind = expected.into();
         if self.is_eof() {
             return Err(format!(
-                "Expected '{}' but reached end of file at line {}{}",
-                expected,
-                self.get_line_number(),
+                "Expected '{}' but reached end of file {}",
+                token,
                 self.get_context()
             ));
         }
 
-        if self.peek_token().eq_ignore_ascii_case(expected) {
+        if self.peek_token()? == &token {
             self.advance();
             Ok(())
         } else {
             Err(format!(
-                "Expected '{}' but found '{}' at token position {} (line {}){}",
-                expected,
-                self.peek_token(),
+                "Expected '{}' but found {:?} '{}' at token position {} {}",
+                token,
+                self.peek_token()?,
+                self.peek_token()?,
                 self.pos,
-                self.get_line_number(),
                 self.get_context()
             ))
         }
