@@ -133,7 +133,7 @@ impl Parser {
         self.push_context("top-level");
 
         while !self.is_eof() {
-            statements.push(self.parse_declaration()?);
+            statements.append(&mut self.parse_declaration()?);
         }
 
         self.pop_context();
@@ -143,18 +143,18 @@ impl Parser {
         })
     }
 
-    fn parse_declaration(&mut self) -> Result<Statement, String> {
+    fn parse_declaration(&mut self) -> Result<Vec<Statement>, String> {
         match self.peek_token()? {
             // kinda cursed, but this is how it is
             TokenKind::Keyword(Keyword::Struct) => {
                 if let Ok(d) = self.try_parse_var_decl(false) {
                     Ok(d)
                 } else {
-                    self.parse_struct()
+                    Ok(vec![Statement::StructDef(self.parse_struct()?)])
                 }
             }
-            TokenKind::Keyword(Keyword::Enum) => self.parse_enum(),
-            TokenKind::Keyword(Keyword::Typedef) => self.parse_typedef(),
+            TokenKind::Keyword(Keyword::Enum) => self.parse_enum().map(|e| vec![e]),
+            TokenKind::Keyword(Keyword::Typedef) => self.parse_typedef().map(|e| vec![e]),
             TokenKind::Keyword(Keyword::Local) => self.parse_var_decl(true),
             TokenKind::Keyword(Keyword::DataType(_) | Keyword::Unsigned | Keyword::Signed) => {
                 self.parse_var_decl(false)
@@ -162,7 +162,7 @@ impl Parser {
             TokenKind::Ident(_) if matches!(self.peek_token_after(1)?, TokenKind::Ident(_)) => {
                 self.parse_var_decl(false)
             }
-            _ => self.parse_statement(),
+            _ => self.parse_statement().map(|e| vec![e]),
         }
     }
 
@@ -213,95 +213,65 @@ impl Parser {
     fn parse_typedef(&mut self) -> Result<Statement, String> {
         self.expect(Keyword::Typedef)?;
 
-        if self.peek_token()? == &Keyword::Struct {
-            eprintln!("[DEBUG] Parsing typedef struct");
-            self.expect(Keyword::Struct)?;
+        let base_ty = self
+            .parse_type()
+            .map_err(|e| format!("{}. Context: parsing typedef{}", e, self.get_context()))?;
 
-            let struct_name = if matches!(self.peek_token()?, TokenKind::Ident(_)) {
-                let name = self.peek_token()?.to_string();
-                self.advance();
+        eprintln!("[DEBUG] Parsing typedef type alias");
 
-                name
-            } else {
-                "".to_string()
-            };
+        let name = self.peek_token()?.to_string();
+        eprintln!("[DEBUG] Typedef name: {}", name);
+        self.advance();
 
-            self.expect(Punctuator::LBrace)?;
-
-            self.push_context(&format!("typedef struct {} fields", struct_name));
-            let fields = self.parse_struct_body()?;
-            self.pop_context();
-
-            self.expect(Punctuator::RBrace)?;
-
-            if self.peek_token()? == &Punctuator::LAngledBracket {
-                self.skip_until(Punctuator::RAngledBracket)?;
-            }
-
-            let type_name = self.peek_token()?.to_string();
-            eprintln!("[DEBUG] Typedef struct name: {}", type_name);
+        let mut ty = base_ty;
+        while self.peek_token()? == &Punctuator::LBracket {
             self.advance();
 
-            if self.peek_token()? == &Punctuator::LAngledBracket {
-                self.skip_until(Punctuator::RAngledBracket)?;
-            }
-
-            self.expect(Punctuator::Semicolon)?;
-
-            Ok(Statement::StructDef {
-                ident: type_name,
-                body: fields,
-            })
-        } else {
-            eprintln!("[DEBUG] Parsing typedef type alias");
-            let base_ty = self
-                .parse_type()
-                .map_err(|e| format!("{}. Context: parsing typedef{}", e, self.get_context()))?;
-
-            let name = self.peek_token()?.to_string();
-            eprintln!("[DEBUG] Typedef name: {}", name);
-            self.advance();
-
-            let mut ty = base_ty;
-            while self.peek_token()? == &Punctuator::LBracket {
-                self.advance();
-
-                let size = if self.peek_token()? != &Punctuator::RBracket {
-                    Some(Box::new(self.parse_expr().map_err(|e| {
-                        format!(
-                            "{}. Context: parsing typedef array dimension{}",
-                            e,
-                            self.get_context()
-                        )
-                    })?))
-                } else {
-                    None
-                };
-
-                self.expect(Punctuator::RBracket).map_err(|e| {
+            let size = if self.peek_token()? != &Punctuator::RBracket {
+                Some(Box::new(self.parse_expr().map_err(|e| {
                     format!(
-                        "{}. Context: in typedef array definition{}",
+                        "{}. Context: parsing typedef array dimension{}",
                         e,
                         self.get_context()
                     )
-                })?;
+                })?))
+            } else {
+                None
+            };
 
-                ty = DataType::Array(Box::new(ty), size);
-            }
+            self.expect(Punctuator::RBracket).map_err(|e| {
+                format!(
+                    "{}. Context: in typedef array definition{}",
+                    e,
+                    self.get_context()
+                )
+            })?;
 
-            self.expect(Punctuator::Semicolon)
+            ty = DataType::Array(Box::new(ty), size);
+        }
+
+        if self.peek_token()? == &Punctuator::LAngledBracket {
+            self.skip_until(Punctuator::RAngledBracket)?;
+        }
+
+        self.expect(Punctuator::Semicolon)
                 .map_err(|e| format!("{}. Context: at end of typedef statement. Current token: '{}' at position {}. Expected ';'", e, self.peek_token().unwrap(), self.pos))?;
 
-            Ok(Statement::TypeDef { ident: name, ty })
-        }
+        Ok(Statement::TypeDef { ident: name, ty })
     }
 
-    fn parse_struct(&mut self) -> Result<Statement, String> {
+    fn parse_struct(&mut self) -> Result<Struct, String> {
         self.expect(Keyword::Struct)?;
 
-        let name = self.peek_token()?.to_string();
-        eprintln!("[DEBUG] Parsing struct: {}", name);
-        self.advance();
+        let ident = if let TokenKind::Ident(i) = self.peek_token()? {
+            Some(i.to_owned())
+        } else {
+            None
+        };
+        if ident.is_some() {
+            self.advance();
+        }
+        eprintln!("[DEBUG] Parsing struct: {:?}", ident);
 
         if self.peek_token()? == &Punctuator::LAngledBracket {
             self.skip_until(Punctuator::RAngledBracket)?;
@@ -310,12 +280,12 @@ impl Parser {
         self.expect(Punctuator::LBrace)?;
         eprintln!("[DEBUG] Entered struct body");
 
-        self.push_context(&format!("struct {} fields", name));
+        self.push_context(&format!("struct {:?} fields", ident));
         let fields = self.parse_struct_body()?;
         self.pop_context();
 
         self.expect(Punctuator::RBrace)?;
-        eprintln!("[DEBUG] Struct {} closed successfully", name);
+        eprintln!("[DEBUG] Struct {:?} closed successfully", ident);
 
         // Handle optional style annotation
         if self.peek_token()? == &Punctuator::LAngledBracket {
@@ -323,19 +293,19 @@ impl Parser {
         }
 
         // Optional type name after closing brace
-        if self.peek_token()? != &Punctuator::Semicolon
-            && self.peek_token()? != &Keyword::Local
-            && !self.is_type_start(self.peek_token()?)
-        {
-            self.advance();
-        }
+        // if self.peek_token()? != &Punctuator::Semicolon
+        //     && self.peek_token()? != &Keyword::Local
+        //     && !self.is_type_start(self.peek_token()?)
+        // {
+        //     self.advance();
+        // }
 
-        if self.peek_token()? == &Punctuator::Semicolon {
-            self.advance();
-        }
+        // if self.peek_token()? == &Punctuator::Semicolon {
+        //     self.advance();
+        // }
 
-        Ok(Statement::StructDef {
-            ident: name,
+        Ok(Struct {
+            ident,
             body: fields,
         })
     }
@@ -343,15 +313,17 @@ impl Parser {
     fn parse_struct_body(&mut self) -> Result<Vec<StructItem>, String> {
         let mut items = Vec::new();
 
-        while self.peek_token()? != &Punctuator::RBrace && !self.is_eof() {
+        while self.peek_token()? != &Punctuator::RBrace {
             let decl = self.parse_declaration()?;
-            items.push(self.into_struct_content(decl)?);
+            for d in decl {
+                items.push(self.into_struct_item(d)?);
+            }
         }
 
         Ok(items)
     }
 
-    fn into_struct_content(&self, decl: Statement) -> Result<StructItem, String> {
+    fn into_struct_item(&self, decl: Statement) -> Result<StructItem, String> {
         match decl {
             Statement::VarDecl {
                 ident,
@@ -363,118 +335,22 @@ impl Parser {
         }
     }
 
-    // fn parse_struct_field(&mut self) -> Result<StructField, String> {
-    //     let base_ty = self.parse_type().map_err(|e| {
-    //         format!(
-    //             "{}. Context: parsing struct field type{}",
-    //             e,
-    //             self.get_context()
-    //         )
-    //     })?;
-
-    //     let name = self
-    //         .peek_token()?
-    //         .ident()
-    //         .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
-    //         .to_string();
-    //     eprintln!("[DEBUG] Struct field name: {}", name);
-    //     self.advance();
-
-    //     let mut ty = base_ty;
-    //     while self.peek_token()? == &Punctuator::LBracket {
-    //         self.advance();
-
-    //         let size = if self.peek_token()? != &Punctuator::RBracket {
-    //             Some(Box::new(self.parse_expr().map_err(|e| {
-    //                 format!(
-    //                     "{}. Context: parsing array size for field '{}'{}",
-    //                     e,
-    //                     name,
-    //                     self.get_context()
-    //                 )
-    //             })?))
-    //         } else {
-    //             None
-    //         };
-
-    //         self.expect(Punctuator::RBracket).map_err(|e| {
-    //             format!(
-    //                 "{}. Context: in array definition for field '{}'{}",
-    //                 e,
-    //                 name,
-    //                 self.get_context()
-    //             )
-    //         })?;
-
-    //         ty = DataType::Array(Box::new(ty), size);
-    //     }
-
-    //     let mut condition = None;
-
-    //     if self.peek_token()? == &Keyword::If {
-    //         self.advance();
-
-    //         condition = Some(self.parse_condition().map_err(|e| {
-    //             format!(
-    //                 "{}. Context: parsing field condition{}",
-    //                 e,
-    //                 self.get_context()
-    //             )
-    //         })?);
-    //     }
-
-    //     if self.peek_token()? == &Punctuator::LAngledBracket {
-    //         self.skip_until(Punctuator::RAngledBracket)?;
-    //     }
-
-    //     let next = self.peek_token()?;
-    //     if next == &Punctuator::Semicolon {
-    //         self.advance();
-    //     } else if next != &Punctuator::RBrace
-    //         && next != &Keyword::Local
-    //         && next != &Keyword::If
-    //         && next != &Keyword::Else
-    //         && next != &Keyword::While
-    //         && next != &Keyword::Switch
-    //     {
-    //         return Err(format!(
-    //             "Expected ';' but found '{}' at token position {}. Context: struct field type={}, name={}{}",
-    //             self.peek_token(),
-    //             self.pos,
-    //             match &ty {
-    //                 DataType::Custom(c) => c.clone(),
-    //                 _ => format!("{:?}", ty),
-    //             },
-    //             name,
-    //             self.get_context()
-    //         ));
-    //     }
-
-    //     return Ok(StructField { ident: name, ty });
-    // }
-
-    // fn is_expression_statement_start(&self) -> bool {
-    //     matches!(self.peek_token(), Ok(res) if matches!(res, TokenKind::Ident(_)))
-    // }
-
-    // fn parse_condition(&mut self) -> Result<Expression, String> {
-    //     self.expect(Punctuator::LParen)?;
-
-    //     let expr = self.parse_expr()?;
-
-    //     self.expect(Punctuator::RParen)?;
-    //     Ok(expr)
-    // }
-
     fn parse_enum(&mut self) -> Result<Statement, String> {
         self.expect(Keyword::Enum)?;
 
-        let name = self
+        let ty = if self.peek_token()? == &Punctuator::LAngledBracket {
+            self.advance();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+
+        let ident = self
             .peek_token()?
             .ident()
             .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
             .to_string();
-        eprintln!("[DEBUG] Parsing enum: {}", name);
+        eprintln!("[DEBUG] Parsing enum: {}", ident);
         self.advance();
 
         if self.peek_token()? == &Punctuator::Colon {
@@ -487,11 +363,7 @@ impl Parser {
 
         let mut variants = Vec::new();
 
-        while self.peek_token()? != &Punctuator::RBrace && !self.is_eof() {
-            if self.peek_token()? == &Punctuator::RBrace {
-                break;
-            }
-
+        while self.peek_token()? != &Punctuator::RBrace {
             let variant_name = self
                 .peek_token()?
                 .ident()
@@ -516,16 +388,20 @@ impl Parser {
         }
 
         self.expect(Punctuator::RBrace)?;
-
+        if self.peek_token()? == &Punctuator::LAngledBracket {
+            self.skip_until(Punctuator::RAngledBracket)?;
+        }
         self.expect(Punctuator::Semicolon)?;
 
-        Ok(Statement::EnumDef {
-            ident: name,
+        Ok(Statement::EnumDef(Enum {
+            ident,
+            ty,
             variants,
-        })
+        }))
     }
 
-    fn parse_var_decl(&mut self, local: bool) -> Result<Statement, String> {
+    fn parse_var_decl(&mut self, local: bool) -> Result<Vec<Statement>, String> {
+        let mut stmts: Vec<Statement> = vec![];
         if local {
             self.expect(Keyword::Local)?;
         }
@@ -538,50 +414,64 @@ impl Parser {
             )
         })?;
 
-        let name = self
-            .peek_token()?
-            .ident()
-            .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
-            .to_string();
-        eprintln!("[DEBUG] Variable name: {}", name);
-        self.advance();
-
-        let mut ty = base_ty;
-        while self.peek_token()? == &Punctuator::LBracket {
+        loop {
+            let ident = self
+                .peek_token()?
+                .ident()
+                .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
+                .to_string();
+            eprintln!("[DEBUG] Variable name: {}", ident);
             self.advance();
 
-            let size = if self.peek_token()? != &Punctuator::RBracket {
-                Some(Box::new(self.parse_expr().map_err(|e| {
+            let mut ty = base_ty.clone();
+            while self.peek_token()? == &Punctuator::LBracket {
+                self.advance();
+
+                let size = if self.peek_token()? != &Punctuator::RBracket {
+                    Some(Box::new(self.parse_expr().map_err(|e| {
+                        format!(
+                            "{}. Context: parsing array size for variable '{}'{}",
+                            e,
+                            ident,
+                            self.get_context()
+                        )
+                    })?))
+                } else {
+                    None
+                };
+
+                self.expect(Punctuator::RBracket)?;
+
+                ty = DataType::Array(Box::new(ty), size);
+            }
+
+            let value = if self.peek_token()? == &Punctuator::Assign {
+                self.advance();
+
+                Some(self.parse_expr().map_err(|e| {
                     format!(
-                        "{}. Context: parsing array size for variable '{}'{}",
+                        "{}. Context: parsing initialization value for variable '{}'{}",
                         e,
-                        name,
+                        ident,
                         self.get_context()
                     )
-                })?))
+                })?)
             } else {
                 None
             };
 
-            self.expect(Punctuator::RBracket)?;
+            let stmt = Statement::VarDecl {
+                ident,
+                ty,
+                value,
+                local,
+            };
+            stmts.push(stmt);
 
-            ty = DataType::Array(Box::new(ty), size);
+            if self.peek_token()? != &Punctuator::Comma {
+                break;
+            }
         }
-
-        let value = if self.peek_token()? == &Punctuator::Assign {
-            self.advance();
-
-            Some(self.parse_expr().map_err(|e| {
-                format!(
-                    "{}. Context: parsing initialization value for variable '{}'{}",
-                    e,
-                    name,
-                    self.get_context()
-                )
-            })?)
-        } else {
-            None
-        };
 
         if self.peek_token()? == &Punctuator::LAngledBracket {
             self.skip_until(Punctuator::RAngledBracket)?;
@@ -591,15 +481,10 @@ impl Parser {
             self.advance();
         }
 
-        Ok(Statement::VarDecl {
-            ident: name,
-            ty,
-            value,
-            local,
-        })
+        Ok(stmts)
     }
 
-    fn try_parse_var_decl(&mut self, local: bool) -> Result<Statement, String> {
+    fn try_parse_var_decl(&mut self, local: bool) -> Result<Vec<Statement>, String> {
         let pos = self.pos;
         match self.parse_var_decl(local) {
             Ok(d) => Ok(d),
@@ -635,7 +520,7 @@ impl Parser {
             eprintln!("[DEBUG] Entering one-line if");
             // self.advance();
 
-            vec![self.parse_declaration()?]
+            self.parse_declaration()?
         };
 
         let else_block = if self.peek_token()? == &Keyword::Else {
@@ -652,7 +537,7 @@ impl Parser {
                 self.expect(Punctuator::RBrace)?;
                 Some(block)
             } else {
-                Some(vec![self.parse_declaration()?])
+                Some(self.parse_declaration()?)
             }
         } else {
             None
@@ -710,7 +595,7 @@ impl Parser {
         let mut stmts = Vec::new();
 
         while self.peek_token()? != &Punctuator::RBrace {
-            stmts.push(self.parse_declaration()?);
+            stmts.append(&mut self.parse_declaration()?);
         }
 
         Ok(stmts)
@@ -763,7 +648,7 @@ impl Parser {
                     {
                         break;
                     }
-                    case_body.push(self.parse_declaration()?);
+                    case_body.append(&mut self.parse_declaration()?);
                 }
                 cases.push(Block(case_body));
             } else {
@@ -771,7 +656,6 @@ impl Parser {
             }
         }
 
-        eprintln!("expecting brace");
         self.expect(Punctuator::RBrace)?;
         eprintln!("[DEBUG] Exiting switch block");
 
@@ -818,15 +702,8 @@ impl Parser {
     fn parse_type(&mut self) -> Result<DataType, String> {
         match self.peek_token()? {
             TokenKind::Keyword(Keyword::Struct) => {
-                self.advance();
-
-                let name = self.peek_token()?.to_string();
-                self.advance();
-
-                self.expect(Punctuator::LBrace)?;
-                let body = self.parse_struct_body()?;
-                self.expect(Punctuator::RBrace)?;
-                Ok(DataType::Struct(name, body))
+                let s = self.parse_struct()?;
+                Ok(DataType::Struct(s))
             }
 
             _ => self.parse_basic_type(),
@@ -846,17 +723,19 @@ impl Parser {
                     self.advance();
                     match self.peek_token()? {
                         TokenKind::Keyword(Keyword::DataType(second)) => {
-                            if second == &DataType::Long {
+                            if second == &DataType::I32 {
                                 self.advance();
-                                DataType::UQuad
+                                DataType::U64
                             } else {
-                                DataType::ULong
+                                DataType::U32
                             }
                         }
-                        _ => d,
+                        _ => d.into_unsigned(),
                     }
                 }
-                _ => DataType::UInt,
+                _ => {
+                    return Err("no type after 'unsigned' found".to_string());
+                }
             };
             return Ok(base_type);
         }
@@ -871,17 +750,19 @@ impl Parser {
                     self.advance();
                     match self.peek_token()? {
                         TokenKind::Keyword(Keyword::DataType(second)) => {
-                            if second == &DataType::Long {
+                            if second == &DataType::I32 {
                                 self.advance();
-                                DataType::UQuad
+                                DataType::I64
                             } else {
-                                DataType::ULong
+                                DataType::I32
                             }
                         }
-                        _ => d,
+                        _ => d.into_signed(),
                     }
                 }
-                _ => DataType::UInt,
+                _ => {
+                    return Err("no type after 'signed' found".to_string());
+                }
             };
             return Ok(base_type);
         }
@@ -1062,7 +943,10 @@ impl Parser {
         };
 
         // Check if it's a known type
-        if !self.is_type_start(token) {
+        if !matches!(
+            token,
+            TokenKind::Keyword(Keyword::DataType(_)) | TokenKind::Ident(_)
+        ) {
             return false;
         }
 

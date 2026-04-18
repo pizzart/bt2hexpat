@@ -1,9 +1,6 @@
 #pragma description Converted from 010 Editor Binary Template
-
-import std.mem;
-
 RequiresVersion(14);
-using ID = char;
+using ID = char[4];
 
 s32 haveValidFormat = false;
 struct WAVRIFFHEADER {
@@ -16,14 +13,14 @@ struct FORMATCHUNK {
     s32 chunkSize;
     s32 pos = FTell();
     s16 wFormatTag;
-    s16 wChannels;
-    s32 dwSamplesPerSec;
-    s32 dwAvgBytesPerSec;
-    s16 wBlockAlign;
-    s16 wBitsPerSample;
+    u16 wChannels;
+    u32 dwSamplesPerSec;
+    u32 dwAvgBytesPerSec;
+    u16 wBlockAlign;
+    u16 wBitsPerSample;
     if (wFormatTag == 17) {
-        s16 wcbsize;
-        s16 wSamplesPerBlock;
+        u16 wcbsize;
+        u16 wSamplesPerBlock;
     }
     haveValidFormat = true;
     if (chunkSize > FTell() - pos) {
@@ -41,20 +38,20 @@ struct DATACHUNK {
         return -1;
     }
     if (format.wBitsPerSample != 8 && format.wBitsPerSample != 16 && format.wBitsPerSample != 32 || chunkSize % (s32) format.wBlockAlign != 0) {
-        char waveformData[chunkSize];
-    } else     if (format.wChannels == 1 && format.wBitsPerSample == 8) {
+        u8 waveformData[chunkSize];
+    } else    if (format.wChannels == 1 && format.wBitsPerSample == 8) {
         u8 samples[chunkSize];
-    } else     if (format.wChannels == 1 && format.wBitsPerSample == 16) {
+    } else    if (format.wChannels == 1 && format.wBitsPerSample == 16) {
         s16 samples[chunkSize / 2];
-    } else     if (format.wChannels == 1 && format.wBitsPerSample == 32) {
+    } else    if (format.wChannels == 1 && format.wBitsPerSample == 32) {
         s32 samples[chunkSize / 4];
     } else {
         struct SAMPLES {
         if (format.wBitsPerSample == 8) {
             u8 channels[format.wChannels];
-        } else         if (format.wBitsPerSample == 16) {
+        } else        if (format.wBitsPerSample == 16) {
             s16 channels[format.wChannels];
-        } else         if (format.wBitsPerSample == 32) {
+        } else        if (format.wBitsPerSample == 32) {
             s32 channels[format.wChannels];
         }
 
@@ -72,7 +69,7 @@ struct DATACHUNK {
 struct FACTCHUNK {
     ID chunkID;
     s32 chunkSize;
-    s32 uncompressedSize;
+    u32 uncompressedSize;
 }
 struct CUEPOINT {
     s32 dwIdentifier;
@@ -138,19 +135,25 @@ while (!FEof()) {
     ReadBytes(tag, FTell(), 4);
     tag[4] = 0;
     match (tag) {
-        (0):
+        (0): {
             FORMATCHUNK format;
-        (1):
+            }
+        (1): {
             DATACHUNK data;
-        (2):
+            }
+        (2): {
             FACTCHUNK fact;
-        (3):
+            }
+        (3): {
             CUECHUNK cue;
-        (4):
+            }
+        (4): {
             LISTCHUNK list;
-        (_):
+            }
+        (_): {
             size = ReadUInt(FTell(), 4);
             Printf("Encountered unknown chunk '%s' of size %d at position %Ld.\n", tag, size, FTell());
             UNKNOWNCHUNK unknown;
+            }
     }
 }

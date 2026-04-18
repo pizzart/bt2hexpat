@@ -3,21 +3,22 @@ use std::{fmt, str::FromStr};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DataType {
-    Char,
-    UChar,
-    Short,
-    UShort,
-    Int,
-    UInt,
-    Long,
-    ULong,
-    Quad,
-    UQuad,
+    I8,
+    U8,
+    I16,
+    U16,
+    I32,
+    U32,
+    I64,
+    U64,
+    HFloat,
     Float,
     Double,
     Array(Box<DataType>, Option<Box<Expression>>),
-    Struct(String, Vec<StructItem>),
+    Struct(Struct),
+    Enum(Box<Enum>),
     Custom(String),
+    Unused,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,6 +46,19 @@ pub struct StructField {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct Struct {
+    pub ident: Option<String>,
+    pub body: Vec<StructItem>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Enum {
+    pub ident: String,
+    pub ty: Option<DataType>,
+    pub variants: Vec<(String, Option<i64>)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Block(pub Vec<Statement>);
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,18 +74,12 @@ pub enum Statement {
         right: Expression,
     },
     Expr(Expression),
-    StructDef {
-        ident: String,
-        body: Vec<StructItem>,
-    },
+    StructDef(Struct),
     TypeDef {
         ident: String,
         ty: DataType,
     },
-    EnumDef {
-        ident: String,
-        variants: Vec<(String, Option<i64>)>,
-    },
+    EnumDef(Enum),
     If {
         condition: Expression,
         then_block: Block,
@@ -86,7 +94,7 @@ pub enum Statement {
         cases: Vec<Block>,
     },
     Block(Block),
-    FunctionCall(String, Vec<Expression>),
+    // FunctionCall(String, Vec<Expression>),
     Return(Option<Expression>),
 }
 
@@ -180,21 +188,42 @@ impl fmt::Display for Expression {
     }
 }
 
+impl DataType {
+    pub fn into_unsigned(self) -> Self {
+        match self {
+            Self::I8 => Self::U8,
+            Self::I16 => Self::U16,
+            Self::I32 => Self::U32,
+            Self::I64 => Self::U64,
+            _ => self,
+        }
+    }
+
+    pub fn into_signed(self) -> Self {
+        match self {
+            Self::U8 => Self::I8,
+            Self::U16 => Self::I16,
+            Self::U32 => Self::I32,
+            Self::U64 => Self::I64,
+            _ => self,
+        }
+    }
+}
+
 impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Self::Char => "char",
-            Self::Double => "double",
+            Self::I8 => "int8",
+            Self::U8 => "uint8",
+            Self::I16 => "int16",
+            Self::U16 => "uint16",
+            Self::I32 => "int32",
+            Self::U32 => "uint32",
+            Self::I64 => "int64",
+            Self::U64 => "uint64",
+            Self::HFloat => "hfloat",
             Self::Float => "float",
-            Self::Int => "int",
-            Self::Long => "long",
-            Self::Quad => "quad",
-            Self::Short => "short",
-            Self::UChar => "uchar",
-            Self::UInt => "uint",
-            Self::ULong => "ulong",
-            Self::UQuad => "uquad",
-            Self::UShort => "ushort",
+            Self::Double => "double",
             Self::Array(dt, size) => &format!(
                 "{}{}",
                 dt,
@@ -203,14 +232,20 @@ impl fmt::Display for DataType {
                     None => "[]".to_string(),
                 }
             ),
-            Self::Struct(s, items) => &format!(
+            Self::Struct(s) => &format!(
                 "struct {} {{\n{}}}",
-                s,
-                items
+                s.ident.clone().unwrap_or_else(|| "NONAME".to_string()),
+                s.body
                     .iter()
                     .fold(String::new(), |a, _| format!("{}{}", a, "structitem\n"))
             ),
+            Self::Enum(e) => &format!(
+                "enum <{}> {} {{}}",
+                e.ty.as_ref().map(|e| e.to_string()).unwrap_or_default(),
+                e.ident
+            ),
             Self::Custom(s) => s,
+            Self::Unused => "UNUSED",
         };
         write!(f, "{}", s)
     }
@@ -220,19 +255,18 @@ impl FromStr for DataType {
     type Err = ParseTokenErr;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "char" => Ok(Self::Char),
-            "double" => Ok(Self::Double),
+        match s.to_lowercase().as_str() {
+            "char" | "byte" | "int8" => Ok(Self::I8),
+            "uchar" | "ubyte" | "uint8" => Ok(Self::U8),
+            "short" | "int16" => Ok(Self::I16),
+            "ushort" | "uint16" | "word" => Ok(Self::U16),
+            "int" | "int32" | "long" => Ok(Self::I32),
+            "uint" | "uint32" | "ulong" | "dword" => Ok(Self::U32),
+            "int64" | "__int64" | "quad" => Ok(Self::I64),
+            "uint64" | "__uint64" | "uquad" | "qword" => Ok(Self::U64),
+            "hfloat" => Ok(Self::Float),
             "float" => Ok(Self::Float),
-            "int" => Ok(Self::Int),
-            "long" => Ok(Self::Long),
-            "quad" => Ok(Self::Quad),
-            "short" => Ok(Self::Short),
-            "uchar" => Ok(Self::UChar),
-            "uint" => Ok(Self::UInt),
-            "ulong" => Ok(Self::ULong),
-            "uquad" => Ok(Self::UQuad),
-            "ushort" => Ok(Self::UShort),
+            "double" => Ok(Self::Double),
             _ => Err(ParseTokenErr),
         }
     }
