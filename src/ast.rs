@@ -53,7 +53,7 @@ pub struct Struct {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Enum {
-    pub ident: String,
+    pub ident: Option<String>,
     pub ty: Option<DataType>,
     pub variants: Vec<(String, Option<i64>)>,
 }
@@ -242,7 +242,7 @@ impl fmt::Display for DataType {
             Self::Enum(e) => &format!(
                 "enum <{}> {} {{}}",
                 e.ty.as_ref().map(|e| e.to_string()).unwrap_or_default(),
-                e.ident
+                e.ident.clone().unwrap_or_else(|| "NONAME".to_string())
             ),
             Self::Custom(s) => s,
             Self::Unused => "UNUSED",

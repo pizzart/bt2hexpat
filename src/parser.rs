@@ -153,7 +153,13 @@ impl Parser {
                     Ok(vec![Statement::StructDef(self.parse_struct()?)])
                 }
             }
-            TokenKind::Keyword(Keyword::Enum) => self.parse_enum().map(|e| vec![e]),
+            TokenKind::Keyword(Keyword::Enum) => {
+                if let Ok(d) = self.try_parse_var_decl(false) {
+                    Ok(d)
+                } else {
+                    Ok(vec![Statement::EnumDef(self.parse_enum()?)])
+                }
+            }
             TokenKind::Keyword(Keyword::Typedef) => self.parse_typedef().map(|e| vec![e]),
             TokenKind::Keyword(Keyword::Local) => self.parse_var_decl(true),
             TokenKind::Keyword(Keyword::DataType(_) | Keyword::Unsigned | Keyword::Signed) => {
@@ -273,6 +279,14 @@ impl Parser {
         }
         eprintln!("[DEBUG] Parsing struct: {:?}", ident);
 
+        if self.peek_token()? == &Punctuator::Semicolon {
+            self.advance();
+            return Ok(Struct {
+                ident,
+                body: vec![],
+            });
+        }
+
         if self.peek_token()? == &Punctuator::LAngledBracket {
             self.skip_until(Punctuator::RAngledBracket)?;
         }
@@ -335,7 +349,7 @@ impl Parser {
         }
     }
 
-    fn parse_enum(&mut self) -> Result<Statement, String> {
+    fn parse_enum(&mut self) -> Result<Enum, String> {
         self.expect(Keyword::Enum)?;
 
         let ty = if self.peek_token()? == &Punctuator::LAngledBracket {
@@ -345,12 +359,8 @@ impl Parser {
             None
         };
 
-        let ident = self
-            .peek_token()?
-            .ident()
-            .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
-            .to_string();
-        eprintln!("[DEBUG] Parsing enum: {}", ident);
+        let ident = self.peek_token()?.ident().map(|s| s.to_owned());
+        eprintln!("[DEBUG] Parsing enum: {:?}", ident);
         self.advance();
 
         if self.peek_token()? == &Punctuator::Colon {
@@ -391,13 +401,17 @@ impl Parser {
         if self.peek_token()? == &Punctuator::LAngledBracket {
             self.skip_until(Punctuator::RAngledBracket)?;
         }
-        self.expect(Punctuator::Semicolon)?;
 
-        Ok(Statement::EnumDef(Enum {
+        if self.peek_token()? == &Punctuator::Semicolon {
+            self.advance();
+        }
+        // self.expect(Punctuator::Semicolon)?;
+
+        Ok(Enum {
             ident,
             ty,
             variants,
-        }))
+        })
     }
 
     fn parse_var_decl(&mut self, local: bool) -> Result<Vec<Statement>, String> {
@@ -704,6 +718,10 @@ impl Parser {
             TokenKind::Keyword(Keyword::Struct) => {
                 let s = self.parse_struct()?;
                 Ok(DataType::Struct(s))
+            }
+            TokenKind::Keyword(Keyword::Enum) => {
+                let e = self.parse_enum()?;
+                Ok(DataType::Enum(Box::new(e)))
             }
 
             _ => self.parse_basic_type(),

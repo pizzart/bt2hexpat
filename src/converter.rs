@@ -43,7 +43,8 @@ impl HexPatConverter {
                 }));
             }
             DataType::Enum(e) => {
-                let new = DataType::Custom(e.ident.to_owned());
+                let new =
+                    DataType::Custom(e.ident.to_owned().unwrap_or_else(|| "NONAME".to_string()));
                 let e = std::mem::replace(datatype, new);
                 to_move.push(Statement::EnumDef(match e {
                     DataType::Enum(e) => *e,
@@ -121,7 +122,7 @@ impl HexPatConverter {
                     let e = std::mem::replace(ty, new);
                     to_move.push(Statement::EnumDef(match e {
                         DataType::Enum(mut e) => {
-                            e.ident = ident.to_owned();
+                            e.ident = Some(ident.to_owned());
                             *e
                         }
                         _ => panic!(
@@ -302,7 +303,7 @@ impl HexPatConverter {
     fn write_enum(&mut self, e: &Enum) -> Result<String, String> {
         let mut output = format!(
             "enum {} : {} {{\n",
-            e.ident,
+            e.ident.clone().unwrap_or_else(|| String::new()),
             e.ty.as_ref()
                 .map_or_else(|| "u32".to_string(), |t| t.to_string())
         );
