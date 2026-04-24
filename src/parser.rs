@@ -1,4 +1,10 @@
-use crate::ast::{data_type::*, stmt::*, template::*, token::*};
+use crate::ast::{
+    attr::{Attribute, AttributeType, Attributes},
+    data_type::*,
+    stmt::*,
+    template::*,
+    token::*,
+};
 use std::collections::VecDeque;
 
 pub struct Parser {
@@ -121,7 +127,7 @@ impl Parser {
     fn parse_def_or_stmt(&mut self) -> Result<Vec<Statement>, String> {
         match self.peek_token()? {
             // kinda cursed, but this is how it is
-            TokenKind::Keyword(Keyword::Struct) => {
+            TokenKind::Keyword(Keyword::Struct | Keyword::Union) => {
                 if let Ok(d) = self.try_parse_var_decl(false) {
                     Ok(d)
                 } else {
@@ -207,18 +213,29 @@ impl Parser {
             ty = DataType::Array(Box::new(ty), size);
         }
 
-        if self.peek_token()? == &Punctuator::LAngledBracket {
-            self.skip_until(Punctuator::RAngledBracket)?;
-        }
+        let attrs = if self.peek_token()? == &Punctuator::LAngledBracket {
+            self.parse_attrs()?
+        } else {
+            Attributes(vec![])
+        };
 
         self.expect(Punctuator::Semicolon)
                 .map_err(|e| format!("{}. Context: at end of typedef statement. Current token: '{}' at position {}. Expected ';'", e, self.peek_token().unwrap(), self.pos))?;
 
-        Ok(Statement::TypeDef { ident: name, ty })
+        Ok(Statement::TypeDef {
+            ident: name,
+            ty,
+            attrs,
+        })
     }
 
     fn parse_struct(&mut self) -> Result<Struct, String> {
-        self.expect(Keyword::Struct)?;
+        let keyword = self.expect_any(vec![Keyword::Struct, Keyword::Union])?;
+        let ty = match keyword {
+            TokenKind::Keyword(Keyword::Struct) => StructType::Struct,
+            TokenKind::Keyword(Keyword::Union) => StructType::Union,
+            _ => panic!(),
+        };
 
         let ident = if let TokenKind::Ident(i) = self.peek_token()? {
             Some(i.to_owned())
@@ -233,8 +250,10 @@ impl Parser {
         if self.peek_token()? == &Punctuator::Semicolon {
             self.advance();
             return Ok(Struct {
+                ty,
                 ident,
                 body: Block(vec![]),
+                attrs: Attributes(vec![]),
             });
         }
 
@@ -250,10 +269,11 @@ impl Parser {
         self.expect(Punctuator::RBrace)?;
         eprintln!("[DEBUG] Struct {:?} closed successfully", ident);
 
-        // Handle optional style annotation
-        if self.peek_token()? == &Punctuator::LAngledBracket {
-            self.skip_until(Punctuator::RAngledBracket)?;
-        }
+        let attrs = if self.peek_token()? == &Punctuator::LAngledBracket {
+            self.parse_attrs()?
+        } else {
+            Attributes(vec![])
+        };
 
         // Optional type name after closing brace
         // if self.peek_token()? != &Punctuator::Semicolon
@@ -268,8 +288,10 @@ impl Parser {
         // }
 
         Ok(Struct {
+            ty,
             ident,
             body: fields,
+            attrs,
         })
     }
 
@@ -286,18 +308,34 @@ impl Parser {
         Ok(Block(items))
     }
 
-    // fn into_struct_item(&self, decl: Statement) -> Result<StructItem, String> {
-    //     match decl {
-    //         Statement::VarDef {
-    //             ident,
-    //             ty,
-    //             value: None,
-    //             local: false,
-    //             bits,
-    //         } => Ok(StructItem::Field(StructField { ident, ty })),
-    //         _ => Ok(StructItem::Statement(Box::new(decl))),
-    //     }
-    // }
+    fn parse_attrs(&mut self) -> Result<Attributes, String> {
+        self.expect(Punctuator::LAngledBracket)?;
+        let mut attrs = vec![];
+        while self.peek_token()? != &Punctuator::RAngledBracket {
+            let ty = match self.peek_token()?.as_attribute() {
+                Some(attr) => attr.clone(),
+                _ => return Err(format!("unknown attribute name {}", self.peek_token()?)),
+            };
+            self.advance();
+            self.expect(Punctuator::Assign)?;
+            let value = self.parse_primary_expr()?;
+            attrs.push(Attribute { ty, value });
+            if self.peek_token()? == &Punctuator::Comma {
+                self.advance();
+            }
+        }
+        self.expect(Punctuator::RAngledBracket)?;
+        Ok(Attributes(attrs))
+    }
+
+    fn attrs_get_pos(&self, attrs: &Attributes) -> Option<Expression> {
+        attrs
+            .0
+            .iter()
+            .filter(|a| matches!(a.ty, AttributeType::Pos))
+            .next()
+            .map(|a| a.value.clone())
+    }
 
     fn parse_enum(&mut self) -> Result<Enum, String> {
         self.expect(Keyword::Enum)?;
@@ -347,9 +385,12 @@ impl Parser {
         }
 
         self.expect(Punctuator::RBrace)?;
-        if self.peek_token()? == &Punctuator::LAngledBracket {
-            self.skip_until(Punctuator::RAngledBracket)?;
-        }
+
+        let attrs = if self.peek_token()? == &Punctuator::LAngledBracket {
+            self.parse_attrs()?
+        } else {
+            Attributes(vec![])
+        };
 
         if self.peek_token()? == &Punctuator::Semicolon {
             self.advance();
@@ -360,6 +401,7 @@ impl Parser {
             ident,
             ty,
             variants,
+            attrs,
         })
     }
 
@@ -377,7 +419,8 @@ impl Parser {
         let pos = self.pos;
         match self.parse_var_decl(false) {
             Ok(d) => Ok(d),
-            Err(_) => {
+            Err(e) => {
+                dbg!(e);
                 self.pos = pos;
                 self.parse_fn_decl().map(|s| vec![s])
             }
@@ -487,22 +530,28 @@ impl Parser {
                 None
             };
 
+            let attrs = if self.peek_token()? == &Punctuator::LAngledBracket {
+                self.parse_attrs()?
+            } else {
+                Attributes(vec![])
+            };
+
+            let pos = self.attrs_get_pos(&attrs);
+
             let stmt = Statement::VarDef {
                 ident,
                 ty,
                 value,
                 local,
                 bits,
+                pos,
+                attrs,
             };
             stmts.push(stmt);
 
             if self.peek_token()? != &Punctuator::Comma {
                 break;
             }
-        }
-
-        if self.peek_token()? == &Punctuator::LAngledBracket {
-            self.skip_until(Punctuator::RAngledBracket)?;
         }
 
         self.expect(Punctuator::Semicolon)?;
@@ -1078,6 +1127,29 @@ impl Parser {
                 self.get_context()
             ))
         }
+    }
+
+    fn expect_any<T>(&mut self, expected: T) -> Result<TokenKind, String>
+    where
+        T: IntoIterator,
+        T::Item: Into<TokenKind>,
+    {
+        let token = self.peek_token()?;
+        for e in expected {
+            let t = e.into();
+            if &t == token {
+                self.advance();
+                return Ok(t);
+            }
+        }
+        Err(format!(
+            "Expected '{}' but found {:?} '{}' at token position {} {}",
+            token,
+            self.peek_token()?,
+            self.peek_token()?,
+            self.pos,
+            self.get_context()
+        ))
     }
 
     fn is_eof(&self) -> bool {

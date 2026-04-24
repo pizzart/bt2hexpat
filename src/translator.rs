@@ -80,7 +80,7 @@ impl Translator {
                     to_move.append(&mut self.reorder_stmts(&mut body.0));
                 }
             }
-            Statement::TypeDef { ident, ty } => match ty {
+            Statement::TypeDef { ident, ty, attrs } => match ty {
                 DataType::Struct(_) => {
                     let new = DataType::Unused;
                     let s = std::mem::replace(ty, new);
@@ -118,6 +118,8 @@ impl Translator {
                 value: _,
                 local: _,
                 bits: _,
+                attrs: _,
+                pos: _,
             } => {
                 to_move.append(&mut self.reorder_in_datatype(ty));
             }
@@ -136,7 +138,11 @@ impl Translator {
             }
         }
         for (i, stmt) in stmts.iter().enumerate() {
-            if let Statement::TypeDef { ident: _, ty } = stmt
+            if let Statement::TypeDef {
+                ident: _,
+                ty,
+                attrs: _,
+            } = stmt
                 && ty == &DataType::Unused
             {
                 to_destroy.push(i);

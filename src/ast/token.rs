@@ -1,5 +1,6 @@
 use std::{fmt, str::FromStr};
 
+use crate::ast::attr::{Attribute, AttributeType};
 use crate::ast::{data_type::DataType, literal::Literal};
 use crate::str_enum;
 
@@ -37,6 +38,10 @@ str_enum! {
                 datatype.to_string(),
                 (s if let Ok(s) = s.parse::<DataType>()) => Ok(Self::DataType(s)),
             },
+            // Attribute(attr: AttributeType) => {
+            //     attr.to_string(),
+            //     (s if let Ok(s) = s.parse::<AttributeType>()) => Ok(Self::Attribute(s)),
+            // },
         }
     }
 }
@@ -111,6 +116,10 @@ impl TokenKind {
             Self::Ident(s) => Some(s),
             _ => None,
         }
+    }
+
+    pub fn as_attribute(&self) -> Option<AttributeType> {
+        self.to_string().parse::<AttributeType>().ok()
     }
 
     pub fn is_assign_op(&self) -> bool {

@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::{
-    ast::{data_type::DataType, literal::Literal, token::Punctuator},
+    ast::{attr::Attributes, data_type::DataType, literal::Literal, token::Punctuator},
     traits::to_imhex::{ToImhex, ToImhexErr},
 };
 
@@ -47,10 +47,10 @@ impl ToImhex for Expression {
     fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
         match self {
             Expression::Literal(lit) => match lit {
-                Literal::Binary(b) => Ok(format!("0b{}", b)),
+                Literal::Binary(b) => Ok(format!("0b{:b}", b)),
                 Literal::Decimal(d) => Ok(d.to_string()),
-                Literal::Hexadecimal(h) => Ok(format!("0x{}", h)),
-                Literal::Octal(o) => Ok(format!("0o{}", o)),
+                Literal::Hexadecimal(h) => Ok(format!("0x{:x}", h)),
+                Literal::Octal(o) => Ok(format!("0o{:o}", o)),
                 Literal::Float(f) => Ok(format!("{}F", f)),
                 Literal::Double(d) => Ok(format!("{}D", d)),
                 Literal::Char(c) => Ok(format!("'{}'", c)),
@@ -89,8 +89,16 @@ impl ToImhex for Expression {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
+    pub ty: StructType,
     pub ident: Option<String>,
     pub body: Block,
+    pub attrs: Attributes,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StructType {
+    Struct,
+    Union,
 }
 
 impl ToImhex for Struct {
@@ -103,7 +111,7 @@ impl ToImhex for Struct {
             }
         } else {
             Ok(format!(
-                "{} {} {}",
+                "{} {} {}{}",
                 if self.body.0.iter().any(|stmt| matches!(
                     stmt,
                     Statement::VarDef {
@@ -111,15 +119,21 @@ impl ToImhex for Struct {
                         ty: _,
                         value: _,
                         local: _,
-                        bits: Some(_)
+                        bits: Some(_),
+                        pos: _,
+                        attrs: _,
                     }
                 )) {
                     "bitfield"
                 } else {
-                    "struct"
+                    match self.ty {
+                        StructType::Union => "union",
+                        StructType::Struct => "struct",
+                    }
                 },
                 self.ident.clone().unwrap_or_else(|| "NONAME".to_string()),
-                self.body.try_to_imhex()?
+                self.body.try_to_imhex()?,
+                self.attrs.try_to_imhex_whitespace()?
             ))
         }
     }
@@ -130,6 +144,7 @@ pub struct Enum {
     pub ident: Option<String>,
     pub ty: Option<DataType>,
     pub variants: Vec<(String, Option<Box<Expression>>)>,
+    pub attrs: Attributes,
 }
 
 impl ToImhex for Enum {
@@ -150,7 +165,7 @@ impl ToImhex for Enum {
             output.push_str(",\n");
         }
 
-        output.push_str("}");
+        output.push_str(&format!("}}{}", self.attrs.try_to_imhex_whitespace()?));
         Ok(output)
     }
 }
@@ -180,20 +195,23 @@ pub enum Statement {
         value: Option<Expression>,
         local: bool,
         bits: Option<usize>,
+        pos: Option<Expression>,
+        attrs: Attributes,
     },
-    Expr(Expression),
     StructDef(Struct),
+    EnumDef(Enum),
     TypeDef {
         ident: String,
         ty: DataType,
+        attrs: Attributes,
     },
-    EnumDef(Enum),
     FnDef {
         ty: DataType,
         ident: String,
         args: Args,
         block: Block,
     },
+    Expr(Expression),
     Assign {
         left: Expression,
         sign: String,
@@ -240,15 +258,20 @@ impl ToImhex for Statement {
         let s = match self {
             Statement::StructDef(s) => s.try_to_imhex(),
             Statement::EnumDef(e) => e.try_to_imhex(),
-            Statement::TypeDef { ident, ty } => {
-                Ok(format!("using {} = {}", ident, ty.try_to_imhex_braced()?))
-            }
+            Statement::TypeDef { ident, ty, attrs } => Ok(format!(
+                "using {} = {} {}",
+                ident,
+                ty.try_to_imhex_braced()?,
+                attrs.try_to_imhex()?
+            )),
             Statement::VarDef {
                 ident,
                 ty,
                 value,
                 local: _,
                 bits,
+                pos,
+                attrs,
             } => {
                 let mut output = String::new();
                 if bits.is_none() || matches!(ty, DataType::Enum(_) | DataType::Custom(_)) {
@@ -270,6 +293,12 @@ impl ToImhex for Statement {
                 }
                 if let Some(b) = bits {
                     output.push_str(&format!(" : {}", b));
+                }
+                if let Some(p) = pos {
+                    output.push_str(&format!(" @ {}", p.try_to_imhex()?));
+                }
+                if !attrs.0.is_empty() {
+                    output.push_str(&format!(" {}", attrs.try_to_imhex()?));
                 }
 
                 Ok(output)

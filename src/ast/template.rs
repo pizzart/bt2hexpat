@@ -20,6 +20,10 @@ impl ToImhex for Template {
         if let Some(author) = &self.metadata.author {
             output.push_str(&format!("#pragma author {}\n", author));
         }
+        output.push_str("import type.float16;\n");
+        output.push_str("import type.guid;\n");
+        output.push_str("import type.time;\n\n");
+
         for stmt in self.statements.iter() {
             output.push_str(&(stmt.try_to_imhex()? + "\n\n"));
         }
