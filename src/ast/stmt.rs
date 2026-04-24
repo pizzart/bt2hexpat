@@ -116,25 +116,33 @@ pub struct Struct {
 
 impl ToImhex for Struct {
     fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
-        Ok(format!(
-            "{} {} {}",
-            if self.body.0.iter().any(|stmt| matches!(
-                stmt,
-                Statement::VarDef {
-                    ident: _,
-                    ty: _,
-                    value: _,
-                    local: _,
-                    bits: Some(_)
-                }
-            )) {
-                "bitfield"
+        if self.body.0.is_empty() {
+            if let Some(ref i) = self.ident {
+                Ok(format!("using {}", i))
             } else {
-                "struct"
-            },
-            self.ident.clone().unwrap_or_else(|| "NONAME".to_string()),
-            self.body.try_to_imhex()?
-        ))
+                Ok(String::new())
+            }
+        } else {
+            Ok(format!(
+                "{} {} {}",
+                if self.body.0.iter().any(|stmt| matches!(
+                    stmt,
+                    Statement::VarDef {
+                        ident: _,
+                        ty: _,
+                        value: _,
+                        local: _,
+                        bits: Some(_)
+                    }
+                )) {
+                    "bitfield"
+                } else {
+                    "struct"
+                },
+                self.ident.clone().unwrap_or_else(|| "NONAME".to_string()),
+                self.body.try_to_imhex()?
+            ))
+        }
     }
 }
 
