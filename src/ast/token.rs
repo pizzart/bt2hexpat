@@ -1,6 +1,6 @@
 use std::{fmt, str::FromStr};
 
-use crate::ast::attr::{Attribute, AttributeType};
+use crate::ast::attr::AttributeType;
 use crate::ast::{data_type::DataType, literal::Literal};
 use crate::str_enum;
 
@@ -181,21 +181,9 @@ impl PartialEq<Keyword> for TokenKind {
     }
 }
 
-impl PartialEq<TokenKind> for Keyword {
-    fn eq(&self, other: &TokenKind) -> bool {
-        matches!(other, TokenKind::Keyword(k) if k == self)
-    }
-}
-
 impl PartialEq<Punctuator> for TokenKind {
     fn eq(&self, other: &Punctuator) -> bool {
         matches!(self, Self::Punc(p) if p == other)
-    }
-}
-
-impl PartialEq<TokenKind> for Punctuator {
-    fn eq(&self, other: &TokenKind) -> bool {
-        matches!(other, TokenKind::Punc(p) if p == self)
     }
 }
 
@@ -207,7 +195,7 @@ impl From<Keyword> for TokenKind {
 
 impl From<&Keyword> for TokenKind {
     fn from(value: &Keyword) -> Self {
-        TokenKind::Keyword(value.clone())
+        value.into()
     }
 }
 
@@ -219,6 +207,6 @@ impl From<Punctuator> for TokenKind {
 
 impl From<&Punctuator> for TokenKind {
     fn from(value: &Punctuator) -> Self {
-        TokenKind::Punc(value.clone())
+        value.into()
     }
 }

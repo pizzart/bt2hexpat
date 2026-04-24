@@ -133,7 +133,7 @@ impl FromStr for Literal {
                 if let Some((s, _)) = pref {
                     token = token.strip_prefix(s).unwrap();
                 }
-                if token.is_empty() {
+                if pref.is_some() && token.is_empty() {
                     token = "0";
                 }
                 let prefix = pref.map(|(_, v)| v);

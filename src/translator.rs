@@ -20,7 +20,7 @@ impl Translator {
         match datatype {
             DataType::Struct(s) => {
                 let new =
-                    DataType::Custom(s.ident.to_owned().unwrap_or_else(|| "NONAME".to_string()));
+                    DataType::Ident(s.ident.to_owned().unwrap_or_else(|| "NONAME".to_string()));
                 let s = std::mem::replace(datatype, new);
                 to_move.push(Statement::StructDef(match s {
                     DataType::Struct(s) => s,
@@ -29,7 +29,7 @@ impl Translator {
             }
             DataType::Enum(e) => {
                 let new =
-                    DataType::Custom(e.ident.to_owned().unwrap_or_else(|| "NONAME".to_string()));
+                    DataType::Ident(e.ident.to_owned().unwrap_or_else(|| "NONAME".to_string()));
                 let e = std::mem::replace(datatype, new);
                 to_move.push(Statement::EnumDef(match e {
                     DataType::Enum(e) => *e,
@@ -80,7 +80,11 @@ impl Translator {
                     to_move.append(&mut self.reorder_stmts(&mut body.0));
                 }
             }
-            Statement::TypeDef { ident, ty, attrs } => match ty {
+            Statement::TypeDef {
+                ident,
+                ty,
+                attrs: _,
+            } => match ty {
                 DataType::Struct(_) => {
                     let new = DataType::Unused;
                     let s = std::mem::replace(ty, new);

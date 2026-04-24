@@ -1,15 +1,23 @@
 use std::fmt;
 
+use derive_more::Deref;
+
 use crate::{
     ast::{attr::Attributes, data_type::DataType, literal::Literal, token::Punctuator},
     traits::to_imhex::{ToImhex, ToImhexErr},
 };
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum UnaryPosition {
+    Prefix,
+    Postfix,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     Literal(Literal),
     Identifier(String),
-    UnaryOp(Punctuator, Box<Expression>),
+    UnaryOp(Punctuator, Box<Expression>, UnaryPosition),
     BinaryOp(Box<Expression>, Punctuator, Box<Expression>),
     Call(Box<Expression>, Vec<Expression>),
     Cast(Box<DataType>, Box<Expression>),
@@ -22,7 +30,10 @@ impl fmt::Display for Expression {
         let s = match self {
             Self::Literal(s) => s.to_string(),
             Self::Identifier(s) => s.to_string(),
-            Self::UnaryOp(s, e) => format!("{}{}", s, e),
+            Self::UnaryOp(s, e, p) => match p {
+                UnaryPosition::Prefix => format!("{}{}", s, e),
+                UnaryPosition::Postfix => format!("{}{}", e, s),
+            },
             Self::BinaryOp(l, s, r) => format!("{}{}{}", l, s, r),
             Self::Call(i, e) => {
                 let mut out = format!("{}(", i);
@@ -57,7 +68,14 @@ impl ToImhex for Expression {
                 Literal::String(s) => Ok(format!("\"{}\"", s)),
             },
             Expression::Identifier(var) => Ok(var.clone()),
-            Expression::UnaryOp(op, right) => Ok(format!("{}{}", op, right.try_to_imhex()?)),
+            Expression::UnaryOp(op, expr, pos) => match op {
+                Punctuator::Inc => Ok(format!("{} += 1", expr)),
+                Punctuator::Dec => Ok(format!("{} -= 1", expr)),
+                _ => match pos {
+                    UnaryPosition::Prefix => Ok(format!("{}{}", op, expr.try_to_imhex()?)),
+                    UnaryPosition::Postfix => Ok(format!("{}{}", expr.try_to_imhex()?, op)),
+                },
+            },
             Expression::BinaryOp(left, op, right) => Ok(format!(
                 "{} {} {}",
                 left.try_to_imhex()?,
@@ -88,22 +106,54 @@ impl ToImhex for Expression {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Struct {
-    pub ty: StructType,
-    pub ident: Option<String>,
-    pub body: Block,
-    pub attrs: Attributes,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum StructType {
     Struct,
     Union,
 }
 
+#[derive(Debug, Clone, PartialEq, Deref)]
+pub struct Args(pub Vec<(DataType, String)>);
+
+impl Args {
+    pub fn try_to_imhex_struct(&self) -> Result<String, ToImhexErr> {
+        let mut output = String::new();
+        let mut iter = self.iter().peekable();
+        while let Some((_, id)) = iter.next() {
+            output.push_str(&format!("auto {}", id));
+            if iter.peek().is_some() {
+                output.push_str(", ")
+            }
+        }
+        Ok(output)
+    }
+}
+
+impl ToImhex for Args {
+    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+        let mut output = String::new();
+        let mut iter = self.iter().peekable();
+        while let Some((dt, id)) = iter.next() {
+            output.push_str(&format!("{} {}", dt.try_to_imhex_fn_arg()?, id));
+            if iter.peek().is_some() {
+                output.push_str(", ")
+            }
+        }
+        Ok(output)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Struct {
+    pub ty: StructType,
+    pub ident: Option<String>,
+    pub args: Args,
+    pub body: Block,
+    pub attrs: Attributes,
+}
+
 impl ToImhex for Struct {
     fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
-        if self.body.0.is_empty() {
+        if self.body.is_empty() {
             if let Some(ref i) = self.ident {
                 Ok(format!("using {}", i))
             } else {
@@ -111,8 +161,8 @@ impl ToImhex for Struct {
             }
         } else {
             Ok(format!(
-                "{} {} {}{}",
-                if self.body.0.iter().any(|stmt| matches!(
+                "{} {}{} {}{}",
+                if self.body.iter().any(|stmt| matches!(
                     stmt,
                     Statement::VarDef {
                         ident: _,
@@ -132,6 +182,11 @@ impl ToImhex for Struct {
                     }
                 },
                 self.ident.clone().unwrap_or_else(|| "NONAME".to_string()),
+                if !self.args.is_empty() {
+                    format!("<{}>", self.args.try_to_imhex_struct()?)
+                } else {
+                    String::new()
+                },
                 self.body.try_to_imhex()?,
                 self.attrs.try_to_imhex_whitespace()?
             ))
@@ -170,22 +225,19 @@ impl ToImhex for Enum {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deref)]
 pub struct Block(pub Vec<Statement>);
 
 impl ToImhex for Block {
     fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
         let mut output = String::from("{\n");
-        for stmt in self.0.iter() {
+        for stmt in self.iter() {
             output.push_str(&self.with_indent(&(stmt.try_to_imhex()? + "\n")));
         }
         output.push_str("}");
         Ok(output)
     }
 }
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Args(pub Vec<(DataType, String)>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
@@ -209,7 +261,7 @@ pub enum Statement {
         ty: DataType,
         ident: String,
         args: Args,
-        block: Block,
+        body: Block,
     },
     Expr(Expression),
     Assign {
@@ -224,6 +276,12 @@ pub enum Statement {
     },
     While {
         condition: Expression,
+        body: Block,
+    },
+    For {
+        init: Expression,
+        test: Expression,
+        upd: Expression,
         body: Block,
     },
     Switch {
@@ -259,10 +317,10 @@ impl ToImhex for Statement {
             Statement::StructDef(s) => s.try_to_imhex(),
             Statement::EnumDef(e) => e.try_to_imhex(),
             Statement::TypeDef { ident, ty, attrs } => Ok(format!(
-                "using {} = {} {}",
+                "using {} = {}{}",
                 ident,
-                ty.try_to_imhex_braced()?,
-                attrs.try_to_imhex()?
+                ty.try_to_imhex_array()?,
+                attrs.try_to_imhex_whitespace()?
             )),
             Statement::VarDef {
                 ident,
@@ -274,7 +332,7 @@ impl ToImhex for Statement {
                 attrs,
             } => {
                 let mut output = String::new();
-                if bits.is_none() || matches!(ty, DataType::Enum(_) | DataType::Custom(_)) {
+                if bits.is_none() || matches!(ty, DataType::Enum(_) | DataType::Ident(_)) {
                     output.push_str(&(ty.try_to_imhex()? + " "));
                 } else if bits.is_some() && ty.is_int() && ty.is_signed() {
                     output.push_str("signed ");
@@ -297,8 +355,8 @@ impl ToImhex for Statement {
                 if let Some(p) = pos {
                     output.push_str(&format!(" @ {}", p.try_to_imhex()?));
                 }
-                if !attrs.0.is_empty() {
-                    output.push_str(&format!(" {}", attrs.try_to_imhex()?));
+                if !attrs.is_empty() {
+                    output.push_str(&format!("{}", attrs.try_to_imhex_whitespace()?));
                 }
 
                 Ok(output)
@@ -307,27 +365,19 @@ impl ToImhex for Statement {
                 ty: _,
                 ident,
                 args,
-                block,
-            } => {
-                let mut output = format!("fn {}(", ident);
-
-                for (i, (dt, id)) in args.0.iter().enumerate() {
-                    output.push_str(&format!("{} {}", dt.try_to_imhex_fn_arg()?, id));
-                    if i < args.0.len() - 1 {
-                        output.push_str(", ")
-                    }
-                }
-
-                output.push_str(") ");
-                output.push_str(&block.try_to_imhex()?);
-
-                Ok(output)
-            }
-            Statement::Assign { left, sign, right } => {
-                let l = left.try_to_imhex()?;
-                let r = right.try_to_imhex()?;
-                Ok(format!("{} {} {}", l, sign, r))
-            }
+                body: block,
+            } => Ok(format!(
+                "fn {}({}) {}",
+                ident,
+                args.try_to_imhex()?,
+                block.try_to_imhex()?
+            )),
+            Statement::Assign { left, sign, right } => Ok(format!(
+                "{} {} {}",
+                left.try_to_imhex()?,
+                sign,
+                right.try_to_imhex()?
+            )),
             Statement::Expr(expr) => expr.try_to_imhex(),
             Statement::If {
                 condition,
@@ -342,7 +392,7 @@ impl ToImhex for Statement {
 
                 if let Some(else_stmts) = else_block {
                     output.push_str(" else ");
-                    match else_stmts.0.first() {
+                    match else_stmts.first() {
                         Some(s @ Statement::If { .. }) => output.push_str(&s.try_to_imhex()?),
                         _ => output.push_str(&else_stmts.try_to_imhex()?),
                     }
@@ -350,11 +400,23 @@ impl ToImhex for Statement {
 
                 Ok(output)
             }
-            Statement::While { condition, body } => {
-                let mut output = format!("while ({}) ", condition.try_to_imhex()?);
-                output.push_str(&body.try_to_imhex()?);
-                Ok(output)
-            }
+            Statement::While { condition, body } => Ok(format!(
+                "while ({}) {}",
+                condition.try_to_imhex()?,
+                body.try_to_imhex()?
+            )),
+            Statement::For {
+                init,
+                test,
+                upd,
+                body,
+            } => Ok(format!(
+                "for ({}, {}, {}) {}",
+                init.try_to_imhex()?,
+                test.try_to_imhex()?,
+                upd.try_to_imhex()?,
+                body.try_to_imhex()?
+            )),
             Statement::Block(block) => block.try_to_imhex(),
             Statement::Return(expr) => expr.as_ref().map_or_else(
                 || Ok("return".to_owned()),
@@ -376,7 +438,7 @@ impl ToImhex for Statement {
                     // } else {
                     let mut body = body.clone();
                     if body.0.last() == Some(&Statement::Break) {
-                        body.0.remove(body.0.len() - 1);
+                        body.0.remove(body.len() - 1);
                     }
                     output.push_str(&self.with_indent_except_first(&body.try_to_imhex()?));
                     // }
@@ -386,7 +448,7 @@ impl ToImhex for Statement {
                     output.push_str(&self.with_indent("(_): "));
                     let mut body = body.clone();
                     if body.0.last() == Some(&Statement::Break) {
-                        body.0.remove(body.0.len() - 1);
+                        body.0.remove(body.len() - 1);
                     }
                     output.push_str(&self.with_indent_except_first(&body.try_to_imhex()?));
                     output.push_str("\n");

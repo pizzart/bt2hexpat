@@ -18,8 +18,9 @@ impl ToImhex for Template {
             output.push_str(&format!("#pragma description {}\n", desc));
         }
         if let Some(author) = &self.metadata.author {
-            output.push_str(&format!("#pragma author {}\n", author));
+            output.push_str(&format!("#pragma author {}\n\n", author));
         }
+        output.push_str("import std.array;\n");
         output.push_str("import type.float16;\n");
         output.push_str("import type.guid;\n");
         output.push_str("import type.time;\n\n");

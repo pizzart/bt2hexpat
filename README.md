@@ -5,17 +5,18 @@
 bt2hexpat is a Rust program for translating [010 Editor](https://www.sweetscape.com/010editor) `.bt` Binary Templates into `.hexpat` [ImHex](https://imhex.werwolv.net) Patterns. Supported features from 010 templates:
 - Datatypes
 - Structs
+- Structs with arguments
+- Struct bitfields
+- Unions
 - Enums
-- Typedef
+- Typedefs
 - Expressions
 - Statements
 - Binary, octal and hex literals
 - Function declarations
-- Bitfields
 
 It does not currently support translating:
-- Structs with arguments
-- Attributes
+- Most 010 attributes
 - 010 Functions
 - #defines
 - Endianness

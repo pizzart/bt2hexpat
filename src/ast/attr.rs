@@ -1,3 +1,5 @@
+use derive_more::Deref;
+
 use crate::{
     ast::stmt::Expression,
     str_enum,
@@ -34,46 +36,23 @@ pub struct Attribute {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum ImhexAttribute {
+pub enum ImhexAttribute {
     Color(Expression),
     Comment(Expression),
     Name(Expression),
     Hidden,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Attributes(pub Vec<Attribute>);
+#[derive(Debug, Clone, PartialEq, Deref)]
+pub struct ImhexAttributes(pub Vec<ImhexAttribute>);
 
-impl Attributes {
-    pub fn try_to_imhex_whitespace(&self) -> Result<String, ToImhexErr> {
-        if self.0.is_empty() {
-            Ok(String::new())
-        } else {
-            Ok(format!(" {}", self.try_to_imhex()?))
-        }
-    }
-}
-
-impl ToImhex for Attributes {
+impl ToImhex for ImhexAttributes {
     fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
-        let mut new_attrs = vec![];
-        for attr in self.0.iter() {
-            let a = match attr.ty {
-                AttributeType::BgColor => Some(ImhexAttribute::Color(attr.value.clone())),
-                AttributeType::Comment => Some(ImhexAttribute::Comment(attr.value.clone())),
-                AttributeType::Name => Some(ImhexAttribute::Name(attr.value.clone())),
-                AttributeType::Hidden => Some(ImhexAttribute::Hidden),
-                _ => None,
-            };
-            if let Some(a) = a {
-                new_attrs.push(a);
-            }
-        }
-        if new_attrs.is_empty() {
+        if self.is_empty() {
             Ok(String::new())
         } else {
             let mut output = "[[".to_owned();
-            let mut iter = new_attrs.iter().peekable();
+            let mut iter = self.iter().peekable();
             while let Some(attr) = iter.next() {
                 let a = match attr {
                     ImhexAttribute::Color(c) => format!("color({})", c.try_to_imhex()?),
@@ -89,5 +68,39 @@ impl ToImhex for Attributes {
             output.push_str("]]");
             Ok(output)
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Deref)]
+pub struct Attributes(pub Vec<Attribute>);
+
+impl Attributes {
+    pub fn try_to_imhex_whitespace(&self) -> Result<String, ToImhexErr> {
+        let attrs = self.to_imhex_attrs();
+        if attrs.is_empty() {
+            Ok(String::new())
+        } else {
+            Ok(format!(" {}", attrs.try_to_imhex()?))
+        }
+    }
+
+    pub fn to_imhex_attrs(&self) -> ImhexAttributes {
+        ImhexAttributes(
+            self.iter()
+                .filter_map(|attr| match attr.ty {
+                    AttributeType::BgColor => Some(ImhexAttribute::Color(attr.value.clone())),
+                    AttributeType::Comment => Some(ImhexAttribute::Comment(attr.value.clone())),
+                    AttributeType::Name => Some(ImhexAttribute::Name(attr.value.clone())),
+                    AttributeType::Hidden => Some(ImhexAttribute::Hidden),
+                    _ => None,
+                })
+                .collect(),
+        )
+    }
+}
+
+impl ToImhex for Attributes {
+    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+        self.to_imhex_attrs().try_to_imhex()
     }
 }

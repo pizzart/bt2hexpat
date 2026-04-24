@@ -31,7 +31,8 @@ pub enum DataType {
     Struct(Struct),
     Enum(Box<Enum>),
     Pointer(Box<DataType>),
-    Custom(String),
+    Ident(String),
+    Args(Box<DataType>, Vec<Expression>),
     Unused,
 }
 
@@ -92,6 +93,18 @@ impl DataType {
             _ => self.try_to_imhex(),
         }
     }
+
+    pub fn try_to_imhex_array(&self) -> Result<String, ToImhexErr> {
+        match self {
+            DataType::Array(base_ty, e) => Ok(format!(
+                "std::Array<{}, {}>",
+                base_ty.try_to_imhex_array()?,
+                e.as_ref()
+                    .map_or_else(|| Ok(String::new()), |exp| exp.try_to_imhex())?
+            )),
+            _ => self.try_to_imhex(),
+        }
+    }
 }
 
 impl fmt::Display for DataType {
@@ -129,7 +142,6 @@ impl fmt::Display for DataType {
                     .map(|s| s.as_str())
                     .unwrap_or_else(|| "NONAME"),
                 s.body
-                    .0
                     .iter()
                     .fold(String::new(), |a, _| format!("{}{}", a, "structitem\n"))
             ),
@@ -139,7 +151,8 @@ impl fmt::Display for DataType {
                 e.ident.clone().unwrap_or_else(|| "NONAME".to_string())
             ),
             Self::Pointer(dt) => &format!("&{}", dt.to_string()),
-            Self::Custom(s) => s,
+            Self::Ident(s) => s,
+            Self::Args(s, args) => &format!("{}({:?})", s, args),
             Self::Unused => "UNUSED",
         };
         write!(f, "{}", s)
@@ -176,17 +189,17 @@ impl FromStr for DataType {
 impl ToImhex for DataType {
     fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
         match self {
-            Self::I8 => Ok("s8".to_string()),
-            Self::U8 => Ok("u8".to_string()),
-            Self::I16 => Ok("s16".to_string()),
-            Self::U16 => Ok("u16".to_string()),
-            Self::I32 => Ok("s32".to_string()),
-            Self::U32 => Ok("u32".to_string()),
-            Self::I64 => Ok("s64".to_string()),
-            Self::U64 => Ok("u64".to_string()),
-            Self::Float => Ok("float".to_string()),
-            Self::Double => Ok("double".to_string()),
-            Self::HFloat => Ok("type::float16".to_string()),
+            Self::I8 => Ok("s8".to_owned()),
+            Self::U8 => Ok("u8".to_owned()),
+            Self::I16 => Ok("s16".to_owned()),
+            Self::U16 => Ok("u16".to_owned()),
+            Self::I32 => Ok("s32".to_owned()),
+            Self::U32 => Ok("u32".to_owned()),
+            Self::I64 => Ok("s64".to_owned()),
+            Self::U64 => Ok("u64".to_owned()),
+            Self::Float => Ok("float".to_owned()),
+            Self::Double => Ok("double".to_owned()),
+            Self::HFloat => Ok("type::float16".to_owned()),
             Self::DosDate => Ok("type::DOSDate".to_owned()),
             Self::DosTime => Ok("type::DOSTime".to_owned()),
             Self::FileTime => Ok("type::FILETIME".to_owned()),
@@ -197,8 +210,16 @@ impl ToImhex for DataType {
             Self::Enum(e) => e.try_to_imhex(),
             Self::Array(base_ty, _) => base_ty.try_to_imhex(),
             Self::Pointer(dt) => Ok(format!("{} &", dt.try_to_imhex()?)),
-            Self::Custom(name) => Ok(name.clone()),
-            Self::Unused => Ok("UNUSED".to_string()),
+            Self::Ident(name) => Ok(name.clone()),
+            Self::Args(name, args) => {
+                let args_str = args
+                    .iter()
+                    .map(|a| a.try_to_imhex())
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(", ");
+                Ok(format!("{}<{}>", name, args_str))
+            }
+            Self::Unused => Ok("UNUSED".to_owned()),
         }
     }
 }
