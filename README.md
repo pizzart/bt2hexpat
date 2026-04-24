@@ -9,12 +9,12 @@ bt2hexpat is a Rust program for translating [010 Editor](https://www.sweetscape.
 - Typedef
 - Expressions
 - Statements
+- Binary, octal and hex literals
+- Function declarations
+- Bitfields
 
 It does not currently support translating:
-- Binary or Hex literals
-- Function declarations
 - Structs with arguments
-- Bitfields
 - Attributes
 - 010 Functions
 - #defines

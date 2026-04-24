@@ -270,7 +270,13 @@ impl ToImhex for Statement {
                 local: _,
                 bits,
             } => {
-                let mut output = format!("{} {}", ty.try_to_imhex()?, ident);
+                let mut output = String::new();
+                if bits.is_none() || matches!(ty, DataType::Enum(_) | DataType::Custom(_)) {
+                    output.push_str(&(ty.try_to_imhex()? + " "));
+                } else if bits.is_some() && ty.is_int() && ty.is_signed() {
+                    output.push_str("signed ");
+                }
+                output.push_str(ident);
 
                 if let DataType::Array(_, size) = ty {
                     if let Some(size_expr) = size {

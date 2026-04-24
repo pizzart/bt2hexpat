@@ -30,6 +30,28 @@ pub enum DataType {
 }
 
 impl DataType {
+    pub fn is_int(&self) -> bool {
+        matches!(
+            self,
+            Self::I8
+                | Self::I16
+                | Self::I32
+                | Self::I64
+                | Self::U8
+                | Self::U16
+                | Self::U32
+                | Self::U64
+        )
+    }
+
+    pub fn is_signed(&self) -> bool {
+        matches!(self, Self::I8 | Self::I16 | Self::I32 | Self::I64)
+    }
+
+    pub fn is_unsigned(&self) -> bool {
+        matches!(self, Self::U8 | Self::U16 | Self::U32 | Self::U64)
+    }
+
     pub fn to_unsigned(&self) -> Self {
         match self {
             Self::I8 => Self::U8,
