@@ -2,12 +2,13 @@ use std::fs;
 use std::path::Path;
 
 mod ast;
-mod converter;
 mod macros;
 mod parser;
+mod traits;
+mod translator;
 
-use converter::HexPatConverter;
 use parser::Parser;
+use translator::Translator;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
@@ -27,11 +28,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse the template
     let mut parser = Parser::new(&content);
-    let template = parser.parse()?;
+    let mut template = parser.parse()?;
 
     // Convert to ImHex format
-    let mut converter = HexPatConverter::new();
-    let hexpat = converter.convert(&template)?;
+    let mut converter = Translator::new();
+    let hexpat = converter.convert(&mut template)?;
 
     // Write output
     fs::write(output_file, hexpat)?;
