@@ -32,7 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Convert to ImHex format
     let mut converter = Translator::new();
-    let hexpat = converter.convert(&mut template)?;
+    let hexpat = converter.translate(&mut template)?;
 
     // Write output
     fs::write(output_file, hexpat)?;

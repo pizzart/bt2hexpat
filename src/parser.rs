@@ -109,7 +109,7 @@ impl Parser {
         let mut statements = Vec::new();
 
         while !self.is_eof() {
-            statements.append(&mut self.parse_def_or()?);
+            statements.append(&mut self.parse_def_or_stmt()?);
         }
 
         Ok(Template {
@@ -118,7 +118,7 @@ impl Parser {
         })
     }
 
-    fn parse_def_or(&mut self) -> Result<Vec<Statement>, String> {
+    fn parse_def_or_stmt(&mut self) -> Result<Vec<Statement>, String> {
         match self.peek_token()? {
             // kinda cursed, but this is how it is
             TokenKind::Keyword(Keyword::Struct) => {
@@ -277,7 +277,7 @@ impl Parser {
         let mut items = Vec::new();
 
         while self.peek_token()? != &Punctuator::RBrace {
-            let decl = self.parse_def_or()?;
+            let decl = self.parse_def_or_stmt()?;
             for d in decl {
                 items.push(d);
             }
@@ -544,7 +544,7 @@ impl Parser {
             eprintln!("[DEBUG] Entering one-line if");
             // self.advance();
 
-            self.parse_def_or()?
+            self.parse_def_or_stmt()?
         };
 
         let else_block = if self.peek_token()? == &Keyword::Else {
@@ -559,7 +559,7 @@ impl Parser {
                 self.expect(Punctuator::RBrace)?;
                 Some(block)
             } else {
-                Some(self.parse_def_or()?)
+                Some(self.parse_def_or_stmt()?)
             }
         } else {
             None
@@ -615,7 +615,7 @@ impl Parser {
         let mut stmts = Vec::new();
 
         while self.peek_token()? != &Punctuator::RBrace {
-            stmts.append(&mut self.parse_def_or()?);
+            stmts.append(&mut self.parse_def_or_stmt()?);
         }
 
         Ok(stmts)
@@ -634,52 +634,51 @@ impl Parser {
 
         eprintln!("[DEBUG] Entering switch block");
         let mut cases = Vec::new();
+        let mut default = None;
 
         while self.peek_token()? != &Punctuator::RBrace {
             // not really sure what to do in this case except clone (either way it's cheap)
-            let token = self.peek_token()?.clone();
+            let token = self.peek_token()?;
 
-            if token == Keyword::Case || token == Keyword::Default {
-                if token == Keyword::Case {
-                    eprintln!("[DEBUG] Parsing case label");
+            match token {
+                TokenKind::Keyword(Keyword::Case) => {
                     self.advance();
-
-                    // Skip the case value
-                    while self.peek_token()? != &Punctuator::Colon {
-                        self.advance();
+                    let expr = self.parse_expr()?;
+                    self.expect(Punctuator::Colon)?;
+                    let mut stmts = vec![];
+                    while self.peek_token()? != &Keyword::Break {
+                        stmts.append(&mut self.parse_def_or_stmt()?);
                     }
-                } else {
-                    eprintln!("[DEBUG] Parsing default label");
-                    self.advance();
+                    self.expect(Keyword::Break)?;
+                    self.expect(Punctuator::Semicolon)?;
+                    cases.push((expr, Block(stmts)));
                 }
-
-                if self.peek_token()? == &Punctuator::Colon {
+                TokenKind::Keyword(Keyword::Default) => {
                     self.advance();
-                }
-
-                let mut case_body = Vec::new();
-                while self.peek_token()? != &Keyword::Case
-                    && self.peek_token()? != &Keyword::Default
-                    && self.peek_token()? != &Punctuator::RBrace
-                {
-                    if self.peek_token()? == &Keyword::Case
-                        || self.peek_token()? == &Keyword::Default
-                        || self.peek_token()? == &Punctuator::RBrace
-                    {
-                        break;
+                    self.expect(Punctuator::Colon)?;
+                    let mut stmts = vec![];
+                    while self.peek_token()? != &Punctuator::RBrace {
+                        stmts.append(&mut self.parse_def_or_stmt()?);
                     }
-                    case_body.append(&mut self.parse_def_or()?);
+                    default.replace(Block(stmts));
                 }
-                cases.push(Block(case_body));
-            } else {
-                break;
+                _ => {
+                    return Err(format!(
+                        "invalid token encountered in switch statement, expected case or default, got {}",
+                        token
+                    ));
+                }
             }
         }
 
         self.expect(Punctuator::RBrace)?;
         eprintln!("[DEBUG] Exiting switch block");
 
-        Ok(Statement::Switch { expr, cases })
+        Ok(Statement::Switch {
+            expr,
+            cases,
+            default,
+        })
     }
 
     fn parse_return(&mut self) -> Result<Statement, String> {
@@ -755,16 +754,10 @@ impl Parser {
                 match next_token {
                     TokenKind::Keyword(Keyword::DataType(dt)) => {
                         let d = dt.clone();
-                        self.advance();
-                        match self.peek_token()? {
-                            TokenKind::Keyword(Keyword::DataType(second)) => {
-                                if token == Keyword::Unsigned {
-                                    second.to_unsigned()
-                                } else {
-                                    second.to_signed()
-                                }
-                            }
-                            _ => d.to_unsigned(),
+                        if token == Keyword::Unsigned {
+                            d.to_unsigned()
+                        } else {
+                            d.to_signed()
                         }
                     }
                     _ => {
@@ -794,7 +787,6 @@ impl Parser {
     fn parse_binary_expr(&mut self, min_prec: i32) -> Result<Expression, String> {
         let mut left = self.parse_primary_expr()?;
 
-        dbg!(&left, self.peek_token()?);
         while let TokenKind::Punc(p) = self.peek_token()?
             && let Some(prec) = self.get_precedence(p)
         {
@@ -1046,7 +1038,7 @@ impl Parser {
     }
 
     fn peek_token_after(&self, after: usize) -> Result<&TokenKind, String> {
-        let (t, s) = self
+        let (t, _) = self
             .tokens
             .get(self.pos + after)
             .ok_or_else(|| format!("EoF at position {}", self.pos))?;

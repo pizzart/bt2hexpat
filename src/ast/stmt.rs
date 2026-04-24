@@ -87,27 +87,6 @@ impl ToImhex for Expression {
     }
 }
 
-// #[derive(Debug, Clone, PartialEq)]
-// pub enum StructItem {
-//     Field(StructField),
-//     Statement(Box<Statement>),
-// }
-
-// impl ToImhex for StructItem {
-//     fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
-//         match self {
-//             Self::Field(_) => todo!("this enum with just statements"),
-//             Self::Statement(s) => s.try_to_imhex(),
-//         }
-//     }
-// }
-
-// #[derive(Debug, Clone, PartialEq)]
-// pub struct StructField {
-//     pub ident: String,
-//     pub ty: DataType,
-// }
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub ident: Option<String>,
@@ -231,7 +210,8 @@ pub enum Statement {
     },
     Switch {
         expr: Expression,
-        cases: Vec<Block>,
+        cases: Vec<(Expression, Block)>,
+        default: Option<Block>,
     },
     Break,
     Continue,
@@ -333,7 +313,10 @@ impl ToImhex for Statement {
 
                 if let Some(else_stmts) = else_block {
                     output.push_str(" else ");
-                    output.push_str(&else_stmts.try_to_imhex()?);
+                    match else_stmts.0.first() {
+                        Some(s @ Statement::If { .. }) => output.push_str(&s.try_to_imhex()?),
+                        _ => output.push_str(&else_stmts.try_to_imhex()?),
+                    }
                 }
 
                 Ok(output)
@@ -350,24 +333,33 @@ impl ToImhex for Statement {
             ),
             Statement::Break => Ok("break".to_owned()),
             Statement::Continue => Ok("continue".to_owned()),
-            Statement::Switch { expr, cases } => {
+            Statement::Switch {
+                expr,
+                cases,
+                default,
+            } => {
                 let mut output = format!("match ({}) {{\n", expr.try_to_imhex()?);
-                for (i, case_body) in cases.iter().enumerate() {
-                    if i == cases.len() - 1 && !cases.is_empty() {
-                        output.push_str(&self.with_indent("(_): "));
-                    } else {
-                        output.push_str(&self.with_indent(&format!("({}): ", i)));
-                    }
+                for (expr, body) in cases.iter() {
+                    output.push_str(&self.with_indent(&format!("({}): ", expr.try_to_imhex()?)));
 
                     // if case_body.0.len() == 1 {
                     //     output.push_str(&case_body.0.get(0).unwrap().try_to_imhex()?);
                     // } else {
-                    let mut body = case_body.clone();
-                    if case_body.0.last() == Some(&Statement::Break) {
-                        body.0.remove(case_body.0.len() - 1);
+                    let mut body = body.clone();
+                    if body.0.last() == Some(&Statement::Break) {
+                        body.0.remove(body.0.len() - 1);
                     }
                     output.push_str(&self.with_indent_except_first(&body.try_to_imhex()?));
                     // }
+                    output.push_str("\n");
+                }
+                if let Some(body) = default {
+                    output.push_str(&self.with_indent("(_): "));
+                    let mut body = body.clone();
+                    if body.0.last() == Some(&Statement::Break) {
+                        body.0.remove(body.0.len() - 1);
+                    }
+                    output.push_str(&self.with_indent_except_first(&body.try_to_imhex()?));
                     output.push_str("\n");
                 }
                 output.push_str("}");

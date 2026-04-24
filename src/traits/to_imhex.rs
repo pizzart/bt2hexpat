@@ -18,6 +18,7 @@ pub trait ToImhex {
             .map(|l| self.indent().to_owned() + l)
             .collect()
     }
+
     fn with_indent_except_first(&self, s: &str) -> String {
         s.split_inclusive('\n')
             .enumerate()
@@ -30,18 +31,7 @@ pub trait ToImhex {
             })
             .collect()
     }
-    fn with_indent_last(&self, s: &str) -> String {
-        s.lines()
-            .enumerate()
-            .map(|(i, l)| {
-                if i == s.lines().count() - 1 {
-                    self.with_indent(l) + "\n"
-                } else {
-                    self.with_indent(l)
-                }
-            })
-            .collect()
-    }
+
     fn indent(&self) -> &'static str {
         "  "
     }

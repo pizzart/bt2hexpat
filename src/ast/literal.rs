@@ -24,6 +24,7 @@ pub enum Literal {
     Double(f64),
 }
 
+#[allow(dead_code)]
 impl Literal {
     pub fn char(&self) -> Option<&char> {
         match self {

@@ -113,13 +113,6 @@ impl TokenKind {
         }
     }
 
-    pub fn punc(&self) -> Option<&Punctuator> {
-        match self {
-            Self::Punc(p) => Some(p),
-            _ => None,
-        }
-    }
-
     pub fn is_assign_op(&self) -> bool {
         matches!(
             self,

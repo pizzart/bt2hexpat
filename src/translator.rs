@@ -10,7 +10,7 @@ impl Translator {
         Translator
     }
 
-    pub fn convert(&mut self, template: &mut Template) -> Result<String, ToImhexErr> {
+    pub fn translate(&mut self, template: &mut Template) -> Result<String, ToImhexErr> {
         self.reorder_stmts(&mut template.statements);
         template.try_to_imhex()
     }
@@ -49,12 +49,6 @@ impl Translator {
         match stmt {
             Statement::Block(st) => {
                 to_move.append(&mut self.reorder_stmts(&mut st.0));
-                // for (i, s) in st.0.into_iter().enumerate() {
-                //     if matches!(s, Statement::StructDef(_) | Statement::EnumDef(_)) {
-                //         let s = st.0.remove(i);
-                //         stmts.push(s);
-                //     }
-                // }
             }
             Statement::EnumDef(e) => {
                 if let Some(dt) = &mut e.ty {
@@ -74,9 +68,16 @@ impl Translator {
             Statement::StructDef(s) => {
                 to_move.append(&mut self.reorder_stmts(&mut s.body.0));
             }
-            Statement::Switch { expr: _, cases } => {
-                for case in cases {
-                    to_move.append(&mut self.reorder_stmts(&mut case.0));
+            Statement::Switch {
+                expr: _,
+                cases,
+                default,
+            } => {
+                for (_, body) in cases {
+                    to_move.append(&mut self.reorder_stmts(&mut body.0));
+                }
+                if let Some(body) = default {
+                    to_move.append(&mut self.reorder_stmts(&mut body.0));
                 }
             }
             Statement::TypeDef { ident, ty } => match ty {
