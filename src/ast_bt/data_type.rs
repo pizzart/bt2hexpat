@@ -1,7 +1,7 @@
 use std::{fmt, str::FromStr};
 
 use crate::{
-    ast::stmt::{Enum, Expression, Struct},
+    ast_bt::stmt::{Enum, Expression, Struct},
     traits::to_imhex::{ToImhex, ToImhexErr},
 };
 

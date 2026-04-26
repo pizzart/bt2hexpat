@@ -1,4 +1,4 @@
-use crate::ast::{
+use crate::ast_bt::{
     attr::{Attribute, AttributeType, Attributes},
     data_type::*,
     stmt::*,
@@ -433,7 +433,8 @@ impl Parser {
         let pos = self.pos;
         match self.parse_var_def(false) {
             Ok(d) => Ok(d),
-            Err(_) => {
+            Err(e) => {
+                dbg!(e);
                 self.pos = pos;
                 self.parse_fn_def().map(|s| vec![s])
             }
@@ -950,6 +951,11 @@ impl Parser {
                 self.expect(Punctuator::RParen)?;
                 Ok(Expression::Call(Box::new(Expression::Identifier(s)), args))
             }
+            TokenKind::Keyword(Keyword::Color(c)) => {
+                let s = c.to_string();
+                self.advance();
+                Ok(Expression::Identifier(s))
+            }
             TokenKind::Ident(s) => {
                 let mut left = Expression::Identifier(s.to_owned());
                 self.advance();
@@ -1033,32 +1039,6 @@ impl Parser {
         is_cast
     }
 
-    // fn parse_function_call(&mut self) -> Result<(), String> {
-    //     let _name = self.peek_token()?.to_string();
-    //     self.advance();
-
-    //     if self.peek_token()? == &Punctuator::LParen {
-    //         self.advance();
-    //         let mut paren_depth = 1;
-    //         while paren_depth > 0 && !self.is_eof() {
-    //             match self.peek_token()? {
-    //                 Punctuator::LParen => paren_depth += 1,
-    //                 Punctuator::RParen => paren_depth -= 1,
-    //                 _ => {}
-    //             }
-    //             if paren_depth > 0 {
-    //                 self.advance();
-    //             }
-    //         }
-    //         self.advance();
-    //     }
-
-    //     if self.peek_token()? == &Punctuator::Semicolon {
-    //         self.advance();
-    //     }
-    //     Ok(())
-    // }
-
     fn parse_literal(&mut self) -> Result<Expression, String> {
         let op = match self.peek_token()? {
             TokenKind::Punc(
@@ -1107,17 +1087,6 @@ impl Parser {
             Punctuator::Assign | Punctuator::PlusAssign | Punctuator::MinusAssign => Some(0),
             _ => None,
         }
-    }
-
-    fn skip_until<T: Into<TokenKind>>(&mut self, end_marker: T) -> Result<(), String> {
-        let end = end_marker.into();
-        while self.peek_token()? != &end && !self.is_eof() {
-            self.advance();
-        }
-        if self.peek_token()? == &end {
-            self.advance();
-        }
-        Ok(())
     }
 
     fn peek_token(&self) -> Result<&TokenKind, String> {

@@ -14,11 +14,11 @@ bt2hexpat is a Rust program for translating [010 Editor](https://www.sweetscape.
 - Statements
 - Binary, octal and hex literals
 - Function declarations
+- #defines
 
 It does not currently support translating:
 - Most 010 attributes
 - 010 Functions
-- #defines
 - Endianness
 - and probably more
 

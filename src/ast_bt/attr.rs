@@ -1,7 +1,7 @@
 use derive_more::Deref;
 
 use crate::{
-    ast::stmt::Expression,
+    ast_bt::stmt::Expression,
     str_enum,
     traits::to_imhex::{ToImhex, ToImhexErr},
 };
@@ -26,6 +26,70 @@ str_enum! {
         Optimize => "optimize",
         Disasm => "disasm",
         Warn => "warn",
+    }
+}
+
+str_enum! {
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum Color {
+        Black => "cBlack",
+        Red => "cRed",
+        DarkRed => "cDkRed",
+        LightRed => "cLtRed",
+        Green => "cGreen",
+        DarkGreen => "cDkGreen",
+        LightGreen => "cLtGreen",
+        Blue => "cBlue",
+        DarkBlue => "cDkBlue",
+        LightBlue => "cLtBlue",
+        Purple => "cPurple",
+        DarkPurple => "cDkPurple",
+        LightPurple => "cLtPurple",
+        Aqua => "cAqua",
+        DarkAqua => "cDkAqua",
+        LightAqua => "cLtAqua",
+        Yellow => "cYellow",
+        DarkYellow => "cDkYellow",
+        LightYellow => "cLtYellow",
+        DarkGray => "cDkGray",
+        Gray => "cGray",
+        Silver => "cSilver",
+        LightGray => "cLtGray",
+        White => "cWhite",
+        None => "cNone",
+    }
+}
+
+impl ToImhex for Color {
+    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+        Ok(match self {
+            Self::Black => "000000",
+            Self::Red => "ff0000",
+            Self::DarkRed => "000080",
+            Self::LightRed => "ff8080",
+            Self::Green => "00ff00",
+            Self::DarkGreen => "008000",
+            Self::LightGreen => "80ff80",
+            Self::Blue => "0000ff",
+            Self::DarkBlue => "000080",
+            Self::LightBlue => "8080ff",
+            Self::Purple => "ff00ff",
+            Self::DarkPurple => "800080",
+            Self::LightPurple => "ff80ff",
+            Self::Aqua => "00ffff",
+            Self::DarkAqua => "008080",
+            Self::LightAqua => "80ffff",
+            Self::Yellow => "ffff00",
+            Self::DarkYellow => "808000",
+            Self::LightYellow => "ffff80",
+            Self::DarkGray => "404040",
+            Self::Gray => "808080",
+            Self::Silver => "0c0c0c",
+            Self::LightGray => "0e0e0e",
+            Self::White => "ffffff",
+            Self::None => "000000",
+        }
+        .to_owned())
     }
 }
 
@@ -55,7 +119,7 @@ impl ToImhex for ImhexAttributes {
             let mut iter = self.iter().peekable();
             while let Some(attr) = iter.next() {
                 let a = match attr {
-                    ImhexAttribute::Color(c) => format!("color({})", c.try_to_imhex()?),
+                    ImhexAttribute::Color(c) => format!("color(\"{}\")", c.try_to_imhex()?),
                     ImhexAttribute::Comment(c) => format!("comment({})", c.try_to_imhex()?),
                     ImhexAttribute::Name(n) => format!("name({})", n.try_to_imhex()?),
                     ImhexAttribute::Hidden => "hidden".to_owned(),

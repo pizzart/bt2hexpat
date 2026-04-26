@@ -1,7 +1,7 @@
 use std::{fmt, str::FromStr};
 
-use crate::ast::attr::AttributeType;
-use crate::ast::{data_type::DataType, literal::Literal};
+use crate::ast_bt::attr::{AttributeType, Color};
+use crate::ast_bt::{data_type::DataType, literal::Literal};
 use crate::str_enum;
 
 str_enum! {
@@ -37,6 +37,10 @@ str_enum! {
             DataType(datatype: DataType) => {
                 datatype.to_string(),
                 (s if let Ok(s) = s.parse::<DataType>()) => Ok(Self::DataType(s)),
+            },
+            Color(color: Color) => {
+                color.to_string(),
+                (s if let Ok(s) = s.parse::<Color>()) => Ok(Self::Color(s)),
             },
             // Attribute(attr: AttributeType) => {
             //     attr.to_string(),

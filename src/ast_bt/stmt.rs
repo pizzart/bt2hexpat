@@ -3,7 +3,12 @@ use std::fmt;
 use derive_more::Deref;
 
 use crate::{
-    ast::{attr::Attributes, data_type::DataType, literal::Literal, token::Punctuator},
+    ast_bt::{
+        attr::{Attributes, Color},
+        data_type::DataType,
+        literal::Literal,
+        token::Punctuator,
+    },
     traits::to_imhex::{ToImhex, ToImhexErr},
 };
 
@@ -69,7 +74,10 @@ impl ToImhex for Expression {
                 Literal::Char(c) => Ok(format!("'{}'", c)),
                 Literal::String(s) => Ok(format!("\"{}\"", s)),
             },
-            Self::Identifier(var) => Ok(var.clone()),
+            Self::Identifier(var) => Ok(match var {
+                _ if let Ok(c) = var.parse::<Color>() => c.try_to_imhex()?,
+                _ => var.to_owned(),
+            }),
             Self::UnaryOp(op, expr, pos) => match op {
                 Punctuator::Inc => Ok(format!("{} += 1", expr)),
                 Punctuator::Dec => Ok(format!("{} -= 1", expr)),
@@ -80,9 +88,15 @@ impl ToImhex for Expression {
             },
             Self::BinaryOp(left, op, right) => Ok(format!(
                 "{} {} {}",
-                left.try_to_imhex()?,
+                match **left {
+                    Self::BinaryOp(_, _, _) => format!("({})", left.try_to_imhex()?),
+                    _ => left.try_to_imhex()?,
+                },
                 op,
-                right.try_to_imhex()?
+                match **right {
+                    Self::BinaryOp(_, _, _) => format!("({})", right.try_to_imhex()?),
+                    _ => right.try_to_imhex()?,
+                },
             )),
             Self::Call(name, args) => {
                 let args_str = args
@@ -305,6 +319,20 @@ impl Statement {
                 | Self::FnDef { .. }
                 | Self::Return(_)
                 | Self::StructDef(_)
+                | Self::TypeDef { .. }
+                | Self::VarDef { .. }
+        )
+    }
+
+    pub fn is_oneline(&self) -> bool {
+        matches!(
+            self,
+            Self::Assign { .. }
+                | Self::Break
+                | Self::CPPDirective(_)
+                | Self::Continue
+                | Self::Expr(_)
+                | Self::Return(_)
                 | Self::TypeDef { .. }
                 | Self::VarDef { .. }
         )

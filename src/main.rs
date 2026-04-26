@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::Path;
 
-mod ast;
+mod ast_bt;
 mod macros;
 mod parser;
 mod traits;
@@ -28,11 +28,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse the template
     let mut parser = Parser::new(&content);
-    let mut template = parser.parse()?;
+    let template = parser.parse()?;
 
     // Convert to ImHex format
     let mut converter = Translator::new();
-    let hexpat = converter.translate(&mut template)?;
+    let hexpat = converter.translate(&template)?;
 
     // Write output
     fs::write(output_file, hexpat)?;

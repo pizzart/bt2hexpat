@@ -1,5 +1,5 @@
 use crate::{
-    ast::stmt::Statement,
+    ast_bt::stmt::Statement,
     traits::to_imhex::{ToImhex, ToImhexErr},
 };
 
@@ -18,15 +18,24 @@ impl ToImhex for Template {
             output.push_str(&format!("#pragma description {}\n", desc));
         }
         if let Some(author) = &self.metadata.author {
-            output.push_str(&format!("#pragma author {}\n\n", author));
+            output.push_str(&format!("#pragma author {}\n", author));
         }
-        output.push_str("import std.array;\n");
+        output.push_str("\nimport std.array;\n");
         output.push_str("import type.float16;\n");
         output.push_str("import type.guid;\n");
         output.push_str("import type.time;\n\n");
 
-        for stmt in self.statements.iter() {
-            output.push_str(&(stmt.try_to_imhex()? + "\n\n"));
+        let mut iter = self.statements.iter().peekable();
+        while let Some(stmt) = iter.next() {
+            let newline = if let Some(p) = iter.peek()
+                && p.is_oneline()
+                && std::mem::discriminant(stmt) == std::mem::discriminant(p)
+            {
+                "\n"
+            } else {
+                "\n\n"
+            };
+            output.push_str(&(stmt.try_to_imhex()? + newline));
         }
         Ok(output)
     }
