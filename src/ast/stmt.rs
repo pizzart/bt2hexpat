@@ -23,6 +23,7 @@ pub enum Expression {
     Cast(Box<DataType>, Box<Expression>),
     FieldAccess(Box<Expression>, String),
     ArrayAccess(Box<Expression>, Box<Expression>),
+    Comment(String),
 }
 
 impl fmt::Display for Expression {
@@ -49,6 +50,7 @@ impl fmt::Display for Expression {
             Self::Cast(dt, e) => format!("({}) {}", dt, e),
             Self::FieldAccess(e, s) => format!("{}.{}", e, s),
             Self::ArrayAccess(a, e) => format!("{}[{}]", a, e),
+            Self::Comment(s) => s.to_owned(),
         };
         write!(f, "{}", s)
     }
@@ -57,7 +59,7 @@ impl fmt::Display for Expression {
 impl ToImhex for Expression {
     fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
         match self {
-            Expression::Literal(lit) => match lit {
+            Self::Literal(lit) => match lit {
                 Literal::Binary(b) => Ok(format!("0b{:b}", b)),
                 Literal::Decimal(d) => Ok(d.to_string()),
                 Literal::Hexadecimal(h) => Ok(format!("0x{:x}", h)),
@@ -67,8 +69,8 @@ impl ToImhex for Expression {
                 Literal::Char(c) => Ok(format!("'{}'", c)),
                 Literal::String(s) => Ok(format!("\"{}\"", s)),
             },
-            Expression::Identifier(var) => Ok(var.clone()),
-            Expression::UnaryOp(op, expr, pos) => match op {
+            Self::Identifier(var) => Ok(var.clone()),
+            Self::UnaryOp(op, expr, pos) => match op {
                 Punctuator::Inc => Ok(format!("{} += 1", expr)),
                 Punctuator::Dec => Ok(format!("{} -= 1", expr)),
                 _ => match pos {
@@ -76,13 +78,13 @@ impl ToImhex for Expression {
                     UnaryPosition::Postfix => Ok(format!("{}{}", expr.try_to_imhex()?, op)),
                 },
             },
-            Expression::BinaryOp(left, op, right) => Ok(format!(
+            Self::BinaryOp(left, op, right) => Ok(format!(
                 "{} {} {}",
                 left.try_to_imhex()?,
                 op,
                 right.try_to_imhex()?
             )),
-            Expression::Call(name, args) => {
+            Self::Call(name, args) => {
                 let args_str = args
                     .iter()
                     .map(|a| a.try_to_imhex())
@@ -90,17 +92,14 @@ impl ToImhex for Expression {
                     .join(", ");
                 Ok(format!("{}({})", name, args_str))
             }
-            Expression::Cast(ty, expr) => {
-                Ok(format!("{}({})", ty.try_to_imhex()?, expr.try_to_imhex()?))
-            }
-            Expression::FieldAccess(expr, field) => {
-                Ok(format!("{}.{}", expr.try_to_imhex()?, field))
-            }
-            Expression::ArrayAccess(expr, index) => Ok(format!(
+            Self::Cast(ty, expr) => Ok(format!("{}({})", ty.try_to_imhex()?, expr.try_to_imhex()?)),
+            Self::FieldAccess(expr, field) => Ok(format!("{}.{}", expr.try_to_imhex()?, field)),
+            Self::ArrayAccess(expr, index) => Ok(format!(
                 "{}[{}]",
                 expr.try_to_imhex()?,
                 index.try_to_imhex()?
             )),
+            Self::Comment(s) => Ok(s.to_owned()),
         }
     }
 }
@@ -293,6 +292,7 @@ pub enum Statement {
     Continue,
     Block(Block),
     Return(Option<Expression>),
+    CPPDirective(String),
 }
 
 impl Statement {
@@ -456,6 +456,7 @@ impl ToImhex for Statement {
                 output.push_str("}");
                 Ok(output)
             }
+            Self::CPPDirective(s) => Ok(s.to_owned()),
         };
         if self.is_with_semicolon() {
             s.map(|s| s + ";")

@@ -107,6 +107,8 @@ pub enum TokenKind {
     Keyword(Keyword),
     Ident(String),
     Literal(Literal),
+    CPPDirective(String),
+    Comment(String),
     Unknown(String),
 }
 
@@ -165,11 +167,13 @@ impl FromStr for TokenKind {
 impl fmt::Display for TokenKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let token = match self {
-            Self::Ident(i) => i.clone(),
+            Self::Ident(i) => i.to_owned(),
             Self::Literal(l) => l.to_string(),
-            Self::Unknown(u) => u.clone(),
             Self::Keyword(kw) => kw.to_string(),
             Self::Punc(p) => p.to_string(),
+            Self::CPPDirective(s) => s.to_owned(),
+            Self::Comment(s) => s.to_owned(),
+            Self::Unknown(s) => s.to_owned(),
         };
         write!(f, "{}", token)
     }

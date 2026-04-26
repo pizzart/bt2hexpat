@@ -37,21 +37,55 @@ impl Parser {
         while let Some(ch) = chars.next() {
             match ch {
                 '/' if chars.peek() == Some(&'/') => {
-                    current.clear();
+                    if !current.is_empty() {
+                        tokens.push_back((current.parse().unwrap(), current));
+                    }
+                    current = ch.to_string();
                     while let Some(c) = chars.next() {
+                        current.push(c);
                         if c == '\n' {
                             break;
                         }
                     }
+                    // tokens.push_back((
+                    //     TokenKind::Comment(current.clone()),
+                    //     current.drain(..).collect(),
+                    // ));
+                    current.clear();
                 }
                 '/' if chars.peek() == Some(&'*') => {
-                    current.clear();
+                    if !current.is_empty() {
+                        tokens.push_back((current.parse().unwrap(), current));
+                    }
+                    current = ch.to_string();
                     while let Some(c) = chars.next() {
+                        current.push(c);
                         if c == '*' && chars.peek() == Some(&'/') {
-                            chars.next();
+                            current.push(chars.next().unwrap());
                             break;
                         }
                     }
+                    // tokens.push_back((
+                    //     TokenKind::Comment(current.clone()),
+                    //     current.drain(..).collect(),
+                    // ));
+                    current.clear();
+                }
+                '#' => {
+                    if !current.is_empty() {
+                        tokens.push_back((current.parse().unwrap(), current));
+                    }
+                    current = ch.to_string();
+                    while let Some(c) = chars.next() {
+                        if c == '\n' {
+                            break;
+                        }
+                        current.push(c);
+                    }
+                    tokens.push_back((
+                        TokenKind::CPPDirective(current.clone()),
+                        current.drain(..).collect(),
+                    ));
                 }
                 '"' => {
                     if !current.is_empty() {
@@ -126,12 +160,13 @@ impl Parser {
 
     fn parse_def_or_stmt(&mut self) -> Result<Vec<Statement>, String> {
         match self.peek_token()? {
-            // kinda cursed, but this is how it is
             TokenKind::Keyword(Keyword::Struct | Keyword::Union) => {
                 if let Ok(d) = self.try_parse_var_def(false) {
                     Ok(d)
                 } else {
-                    Ok(vec![Statement::StructDef(self.parse_struct()?)])
+                    let s = Statement::StructDef(self.parse_struct()?);
+                    self.optional(Punctuator::Semicolon)?;
+                    Ok(vec![s])
                 }
             }
             TokenKind::Keyword(Keyword::Enum) => {
@@ -144,10 +179,15 @@ impl Parser {
             TokenKind::Keyword(Keyword::Typedef) => self.parse_typedef().map(|e| vec![e]),
             TokenKind::Keyword(Keyword::Local) => self.parse_var_def(true),
             TokenKind::Keyword(Keyword::DataType(_) | Keyword::Unsigned | Keyword::Signed) => {
-                self.parse_var_or_fn_decl()
+                self.parse_var_or_fn_def()
             }
             TokenKind::Ident(_) if matches!(self.peek_token_after(1)?, TokenKind::Ident(_)) => {
-                self.parse_var_or_fn_decl()
+                self.parse_var_or_fn_def()
+            }
+            TokenKind::CPPDirective(s) => {
+                let s = s.clone();
+                self.advance();
+                Ok(vec![Statement::CPPDirective(s)])
             }
             _ => self.parse_stmt().map(|e| vec![e]),
         }
@@ -369,10 +409,7 @@ impl Parser {
             Attributes(vec![])
         };
 
-        if self.peek_token()? == &Punctuator::Semicolon {
-            self.advance();
-        }
-        // self.expect(Punctuator::Semicolon)?;
+        self.optional(Punctuator::Semicolon)?;
 
         Ok(Enum {
             ident,
@@ -392,7 +429,7 @@ impl Parser {
         Ok(ident)
     }
 
-    fn parse_var_or_fn_decl(&mut self) -> Result<Vec<Statement>, String> {
+    fn parse_var_or_fn_def(&mut self) -> Result<Vec<Statement>, String> {
         let pos = self.pos;
         match self.parse_var_def(false) {
             Ok(d) => Ok(d),
@@ -436,6 +473,7 @@ impl Parser {
         let args = self.parse_args()?;
         self.expect(Punctuator::RParen)?;
         let body = self.parse_any_block()?;
+        self.optional(Punctuator::Semicolon)?;
         Ok(Statement::FnDef {
             ty,
             ident,
@@ -1063,9 +1101,10 @@ impl Parser {
             | Punctuator::RAngledBracket
             | Punctuator::LessEqual
             | Punctuator::GreaterEqual => Some(7),
-            Punctuator::Plus | Punctuator::Minus => Some(8),
-            Punctuator::Asterisk | Punctuator::Div | Punctuator::Mod => Some(9),
-            Punctuator::Assign => Some(0),
+            Punctuator::BitLeftShift | Punctuator::BitRightShift => Some(8),
+            Punctuator::Plus | Punctuator::Minus => Some(9),
+            Punctuator::Asterisk | Punctuator::Div | Punctuator::Mod => Some(10),
+            Punctuator::Assign | Punctuator::PlusAssign | Punctuator::MinusAssign => Some(0),
             _ => None,
         }
     }
