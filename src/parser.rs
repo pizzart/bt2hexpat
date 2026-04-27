@@ -22,8 +22,8 @@ impl Parser {
         let mut context = "Context: ".to_string();
         for i in 0..=4 {
             if let Some(t) = self.tokens.get(self.pos + i - 2).map(|(_, s)| s) {
-                context.push_str(&t);
-                context.push_str(" ");
+                context.push_str(t);
+                context.push(' ');
             }
         }
         context
@@ -41,7 +41,7 @@ impl Parser {
                         tokens.push_back((current.parse().unwrap(), current));
                     }
                     current = ch.to_string();
-                    while let Some(c) = chars.next() {
+                    for c in chars.by_ref() {
                         current.push(c);
                         if c == '\n' {
                             break;
@@ -76,7 +76,7 @@ impl Parser {
                         tokens.push_back((current.parse().unwrap(), current));
                     }
                     current = ch.to_string();
-                    while let Some(c) = chars.next() {
+                    for c in chars.by_ref() {
                         if c == '\n' {
                             break;
                         }
@@ -84,7 +84,7 @@ impl Parser {
                     }
                     tokens.push_back((
                         TokenKind::CPPDirective(current.clone()),
-                        current.drain(..).collect(),
+                        std::mem::take(&mut current),
                     ));
                 }
                 '"' => {
@@ -95,14 +95,18 @@ impl Parser {
                     while let Some(c) = chars.next() {
                         current.push(c);
                         if c == '"' && current.len() == 2 {
-                            tokens
-                                .push_back((current.parse().unwrap(), current.drain(..).collect()));
+                            tokens.push_back((
+                                current.parse().unwrap(),
+                                std::mem::take(&mut current),
+                            ));
                             break;
                         }
                         if c != '\\' && chars.peek() == Some(&'"') {
                             current.push(chars.next().unwrap());
-                            tokens
-                                .push_back((current.parse().unwrap(), current.drain(..).collect()));
+                            tokens.push_back((
+                                current.parse().unwrap(),
+                                std::mem::take(&mut current),
+                            ));
                             break;
                         }
                     }
@@ -115,8 +119,10 @@ impl Parser {
                     while let Some(c) = chars.next() {
                         current.push(c);
                         if c != '\\' && chars.peek() == Some(&'\'') {
-                            tokens
-                                .push_back((current.parse().unwrap(), current.drain(..).collect()));
+                            tokens.push_back((
+                                current.parse().unwrap(),
+                                std::mem::take(&mut current),
+                            ));
                             current.push(chars.next().unwrap());
                             break;
                         }
@@ -124,14 +130,14 @@ impl Parser {
                 }
                 _ if ch.is_whitespace() => {
                     if !current.is_empty() {
-                        tokens.push_back((current.parse().unwrap(), current.drain(..).collect()));
+                        tokens.push_back((current.parse().unwrap(), std::mem::take(&mut current)));
                     }
                 }
                 _ if !current.is_empty()
                     && let TokenKind::Unknown(_) =
                         format!("{}{}", current, ch).parse().unwrap() =>
                 {
-                    tokens.push_back((current.parse().unwrap(), current.drain(..).collect()));
+                    tokens.push_back((current.parse().unwrap(), std::mem::take(&mut current)));
                     current = ch.to_string();
                 }
                 _ => current.push(ch),
@@ -349,8 +355,7 @@ impl Parser {
     fn attrs_get_pos(&self, attrs: &Attributes) -> Option<Expression> {
         attrs
             .iter()
-            .filter(|a| matches!(a.ty, AttributeType::Pos))
-            .next()
+            .find(|a| matches!(a.ty, AttributeType::Pos))
             .map(|a| a.value.clone())
     }
 
@@ -904,7 +909,7 @@ impl Parser {
                     let expr = Box::new(self.parse_primary_expr()?);
                     eprintln!("[DEBUG] Parsed cast to type {:?}", cast_type);
 
-                    return Ok(Expression::Cast(cast_type, expr));
+                    Ok(Expression::Cast(cast_type, expr))
                 } else {
                     // Regular parenthesized expression
                     let expr = self.parse_expr()?;

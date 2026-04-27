@@ -203,7 +203,7 @@ impl From<Keyword> for TokenKind {
 
 impl From<&Keyword> for TokenKind {
     fn from(value: &Keyword) -> Self {
-        value.into()
+        value.clone().into()
     }
 }
 
@@ -215,6 +215,6 @@ impl From<Punctuator> for TokenKind {
 
 impl From<&Punctuator> for TokenKind {
     fn from(value: &Punctuator) -> Self {
-        value.into()
+        value.clone().into()
     }
 }

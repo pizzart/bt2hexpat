@@ -140,8 +140,8 @@ impl Translator {
                         ident: ident.clone(),
                         ty: self.create_datatype(ty, dest),
                         value: value.clone(),
-                        local: local.clone(),
-                        bits: bits.clone(),
+                        local: *local,
+                        bits: *bits,
                         pos: pos.clone(),
                         attrs: attrs.clone(),
                     });

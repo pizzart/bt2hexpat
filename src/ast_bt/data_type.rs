@@ -26,14 +26,13 @@ pub enum DataType {
     FileTime,
     TimeT,
     Time64T,
-    GUID,
+    Guid,
     Array(Box<DataType>, Option<Box<Expression>>),
     Struct(Struct),
     Enum(Box<Enum>),
     Pointer(Box<DataType>),
     Ident(String),
     Args(Box<DataType>, Vec<Expression>),
-    Unused,
 }
 
 impl DataType {
@@ -82,18 +81,6 @@ impl DataType {
         }
     }
 
-    pub fn try_to_imhex_braced(&self) -> Result<String, ToImhexErr> {
-        match self {
-            DataType::Array(base_ty, e) => Ok(format!(
-                "{}[{}]",
-                base_ty.try_to_imhex_braced()?,
-                e.as_ref()
-                    .map_or_else(|| Ok(String::new()), |exp| exp.try_to_imhex())?
-            )),
-            _ => self.try_to_imhex(),
-        }
-    }
-
     pub fn try_to_imhex_array(&self) -> Result<String, ToImhexErr> {
         match self {
             DataType::Array(base_ty, e) => Ok(format!(
@@ -126,7 +113,7 @@ impl fmt::Display for DataType {
             Self::FileTime => "FILETIME",
             Self::TimeT => "time_t",
             Self::Time64T => "time_64_t",
-            Self::GUID => "GUID",
+            Self::Guid => "GUID",
             Self::Array(dt, size) => &format!(
                 "{}{}",
                 dt,
@@ -137,10 +124,7 @@ impl fmt::Display for DataType {
             ),
             Self::Struct(s) => &format!(
                 "struct {} {{\n{}}}",
-                s.ident
-                    .as_ref()
-                    .map(|s| s.as_str())
-                    .unwrap_or_else(|| "NONAME"),
+                s.ident.as_deref().unwrap_or("NONAME"),
                 s.body
                     .iter()
                     .fold(String::new(), |a, _| format!("{}{}", a, "structitem\n"))
@@ -150,10 +134,9 @@ impl fmt::Display for DataType {
                 e.ty.as_ref().map(|e| e.to_string()).unwrap_or_default(),
                 e.ident.clone().unwrap_or_else(|| "NONAME".to_string())
             ),
-            Self::Pointer(dt) => &format!("&{}", dt.to_string()),
+            Self::Pointer(dt) => &format!("&{}", dt),
             Self::Ident(s) => s,
             Self::Args(s, args) => &format!("{}({:?})", s, args),
-            Self::Unused => "UNUSED",
         };
         write!(f, "{}", s)
     }
@@ -180,7 +163,7 @@ impl FromStr for DataType {
             "filetime" => Ok(Self::FileTime),
             "time_t" => Ok(Self::TimeT),
             "time_64_t" => Ok(Self::Time64T),
-            "guid" => Ok(Self::GUID),
+            "guid" => Ok(Self::Guid),
             _ => Err(ParseDataTypeErr),
         }
     }
@@ -205,7 +188,7 @@ impl ToImhex for DataType {
             Self::FileTime => Ok("type::FILETIME".to_owned()),
             Self::TimeT => Ok("type::time_t".to_owned()),
             Self::Time64T => Ok("type::time_64_t".to_owned()),
-            Self::GUID => Ok("type::GUID".to_owned()),
+            Self::Guid => Ok("type::GUID".to_owned()),
             Self::Struct(s) => s.try_to_imhex(),
             Self::Enum(e) => e.try_to_imhex(),
             Self::Array(base_ty, _) => base_ty.try_to_imhex(),
@@ -219,7 +202,6 @@ impl ToImhex for DataType {
                     .join(", ");
                 Ok(format!("{}<{}>", name, args_str))
             }
-            Self::Unused => Ok("UNUSED".to_owned()),
         }
     }
 }

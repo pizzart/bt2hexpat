@@ -49,7 +49,7 @@ impl fmt::Display for Expression {
                         out.push_str(", ");
                     }
                 }
-                out.push_str(")");
+                out.push(')');
                 out
             }
             Self::Cast(dt, e) => format!("({}) {}", dt, e),
@@ -219,7 +219,7 @@ impl ToImhex for Enum {
     fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
         let mut output = format!(
             "enum {} : {} {{\n",
-            self.ident.clone().unwrap_or_else(|| String::new()),
+            self.ident.clone().unwrap_or_default(),
             self.ty
                 .as_ref()
                 .map_or_else(|| Ok("u32".to_string()), |t| t.try_to_imhex())?
@@ -247,7 +247,7 @@ impl ToImhex for Block {
         for stmt in self.iter() {
             output.push_str(&self.with_indent(&(stmt.try_to_imhex()? + "\n")));
         }
-        output.push_str("}");
+        output.push('}');
         Ok(output)
     }
 }
@@ -384,7 +384,7 @@ impl ToImhex for Statement {
                     output.push_str(&format!(" @ {}", p.try_to_imhex()?));
                 }
                 if !attrs.is_empty() {
-                    output.push_str(&format!("{}", attrs.try_to_imhex_whitespace()?));
+                    output.push_str(&attrs.try_to_imhex_whitespace()?);
                 }
 
                 Ok(output)
@@ -470,7 +470,7 @@ impl ToImhex for Statement {
                     }
                     output.push_str(&self.with_indent_except_first(&body.try_to_imhex()?));
                     // }
-                    output.push_str("\n");
+                    output.push('\n');
                 }
                 if let Some(body) = default {
                     output.push_str(&self.with_indent("(_): "));
@@ -479,9 +479,9 @@ impl ToImhex for Statement {
                         body.0.remove(body.len() - 1);
                     }
                     output.push_str(&self.with_indent_except_first(&body.try_to_imhex()?));
-                    output.push_str("\n");
+                    output.push('\n');
                 }
-                output.push_str("}");
+                output.push('}');
                 Ok(output)
             }
             Self::CPPDirective(s) => Ok(s.to_owned()),
