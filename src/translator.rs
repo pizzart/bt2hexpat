@@ -1,5 +1,5 @@
 use crate::{
-    ast_bt::{data_type::*, stmt::*, template::*},
+    ast_bt::{data_type::*, literal::Literal, stmt::*, template::*},
     traits::to_imhex::{ToImhex, ToImhexErr},
 };
 
@@ -23,11 +23,21 @@ impl Translator {
         for stmt in def_stmts {
             stmts.insert(after_onelines, stmt);
         }
+        for stmt in stmts.iter_mut() {
+            if let Statement::VarDef {
+                value: None,
+                local: false,
+                pos,
+                ..
+            } = stmt
+            {
+                *pos = Some(Expression::Literal(Literal::Hexadecimal(0)));
+            }
+        }
         let pat = Template {
             metadata: template.metadata.clone(),
             statements: stmts,
         };
-        // self.reorder_stmts(&mut template.statements);
         pat.try_to_imhex()
     }
 
