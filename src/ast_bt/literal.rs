@@ -1,4 +1,4 @@
-use std::{fmt, str::FromStr};
+use std::str::FromStr;
 
 use thiserror::Error;
 
@@ -70,21 +70,6 @@ enum LiteralPrefix {
     Binary,
     Hex,
     Octal,
-}
-
-impl fmt::Display for Literal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Literal::Char(c) => format!("'{}'", c),
-            Literal::String(s) => format!("\"{}\"", s),
-            Literal::Decimal(i)
-            | Literal::Octal(i)
-            | Literal::Binary(i)
-            | Literal::Hexadecimal(i) => i.to_string(),
-            Literal::Float(f) | Literal::Double(f) => f.to_string(),
-        };
-        write!(f, "{}", s)
-    }
 }
 
 impl FromStr for Literal {

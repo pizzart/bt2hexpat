@@ -1,24 +1,24 @@
 use crate::{
     ast_bt::{
-        attr::{Attribute, Attributes, Color},
+        attr::{Attribute, AttributeType, Attributes, Color},
         data_type::*,
         literal::Literal,
         stmt::*,
         template::*,
-        token::Punctuator,
+        token::{Ident, Punctuator, ReservedFunction},
     },
     ast_hexpat::pattern::HexPattern,
     traits::to_imhex::{ToHexpatErr, ToHexpatStr},
 };
 
 pub struct Translator {
-    current_color: Color,
+    current_color: Option<Literal>,
 }
 
 impl Translator {
     pub fn new() -> Self {
         Translator {
-            current_color: Color::None,
+            current_color: None,
         }
     }
 
@@ -34,21 +34,25 @@ impl Translator {
         }
         def_stmts.sort_by(|a, b| {
             if a.is_oneline() && !b.is_oneline() {
-                std::cmp::Ordering::Greater
-            } else if !a.is_oneline() && b.is_oneline() {
                 std::cmp::Ordering::Less
+            } else if !a.is_oneline() && b.is_oneline() {
+                std::cmp::Ordering::Greater
             } else {
                 std::cmp::Ordering::Equal
             }
         });
-        for stmt in def_stmts {
+        for stmt in def_stmts.into_iter().rev() {
             stmts.insert(after_onelines, stmt);
         }
         let pat = HexPattern(stmts);
         pat.to_hexpat()
     }
 
-    fn create_statements(&self, src: &Vec<Statement>, dest: &mut Vec<Statement>) -> Vec<Statement> {
+    fn create_statements(
+        &mut self,
+        src: &Vec<Statement>,
+        dest: &mut Vec<Statement>,
+    ) -> Vec<Statement> {
         let mut stmts = vec![];
         for stmt in src {
             match stmt {
@@ -144,17 +148,67 @@ impl Translator {
                     pos,
                     attrs,
                 } => {
-                    let v = value.as_ref().map(|e| self.create_expression(e));
                     let p = pos.as_ref().map(|e| self.create_expression(e));
-                    stmts.push(Statement::VarDef {
-                        ident: ident.clone(),
-                        ty: self.create_datatype(ty, dest),
-                        value: v,
-                        local: *local,
-                        bits: *bits,
-                        pos: p,
-                        attrs: self.create_attrs(attrs),
-                    });
+                    if let Ident::Custom(i) = ident
+                        && i == "padding"
+                        && value.is_none() & !local
+                        && bits.is_none()
+                    {
+                        stmts.push(Statement::Expr(Expression::ArrayAccess(
+                            Box::new(Expression::Identifier(ident.clone())),
+                            Box::new(match ty {
+                                DataType::Array(dt, Some(e)) => Expression::BinaryOp(
+                                    e.clone(),
+                                    Punctuator::Asterisk,
+                                    Box::new(Expression::Literal(Literal::Decimal(
+                                        dt.get_size_bytes().unwrap_or(1),
+                                    ))),
+                                ),
+                                DataType::Array(dt, None) => Expression::Literal(Literal::Decimal(
+                                    dt.get_size_bytes().unwrap_or(1),
+                                )),
+                                _ => Expression::Literal(Literal::Decimal(
+                                    ty.get_size_bytes().unwrap_or(1),
+                                )),
+                            }),
+                        )));
+                    } else {
+                        let mut ident = ident.clone();
+                        let mut count = 0;
+                        for s in stmts.iter() {
+                            match s {
+                                Statement::VarDef { ident: i, .. } if *i == ident => {
+                                    count += 1;
+                                }
+                                _ => (),
+                            }
+                        }
+                        if count > 0 {
+                            match ident {
+                                Ident::Custom(ref mut i) => i.push_str(count.to_string().as_str()),
+                                _ => (),
+                            }
+                        }
+                        let v = value.as_ref().map(|e| self.create_expression(e));
+                        let mut attrs = attrs.clone();
+                        if let Some(c) = &self.current_color
+                            && !attrs.contains_type(&AttributeType::BgColor)
+                        {
+                            attrs.0.push(Attribute {
+                                ty: AttributeType::BgColor,
+                                value: Expression::Literal(c.clone()),
+                            });
+                        }
+                        stmts.push(Statement::VarDef {
+                            ident: ident,
+                            ty: self.create_datatype(ty, dest),
+                            value: v,
+                            local: *local,
+                            bits: *bits,
+                            pos: p,
+                            attrs: self.create_attrs(&attrs),
+                        });
+                    }
                 }
                 Statement::Expr(e) => stmts.push(Statement::Expr(self.create_expression(e))),
                 Statement::Return(e) => stmts.push(Statement::Return(
@@ -166,7 +220,7 @@ impl Translator {
         stmts
     }
 
-    fn create_attrs(&self, src: &Attributes) -> Attributes {
+    fn create_attrs(&mut self, src: &Attributes) -> Attributes {
         let mut new = vec![];
         for attr in src.iter() {
             new.push(Attribute {
@@ -177,72 +231,168 @@ impl Translator {
         Attributes(new)
     }
 
-    fn create_expression(&self, src: &Expression) -> Expression {
+    fn create_expression(&mut self, src: &Expression) -> Expression {
         match src {
-            Expression::Call(name, args) => match &**name {
-                Expression::Identifier(i) => match i.as_str() {
-                    "BigEndian" => Expression::Call(
-                        Box::new(Expression::Identifier("std::core::set_endian".to_owned())),
-                        vec![Expression::Identifier("std::mem::endian::Big".to_owned())],
-                    ),
-                    "LittleEndian" => Expression::Call(
-                        Box::new(Expression::Identifier("std::core::set_endian".to_owned())),
-                        vec![Expression::Identifier(
-                            "std::mem::endian::Little".to_owned(),
-                        )],
-                    ),
-                    "FEof" => Expression::Call(
-                        Box::new(Expression::Identifier("std::core::eof".to_owned())),
-                        vec![],
-                    ),
-                    "FTell" => Expression::Identifier("$".to_owned()),
-                    "FileSize" => Expression::Call(
-                        Box::new(Expression::Identifier("std::mem::size".to_owned())),
-                        vec![],
-                    ),
-                    "Printf" => Expression::Call(
-                        Box::new(Expression::Identifier("std::print".to_owned())),
-                        args.clone(),
-                    ),
-                    "Warning" => Expression::Call(
-                        Box::new(Expression::Identifier("std::warning".to_owned())),
-                        args.clone(),
-                    ),
-                    "SPrintf" => Expression::BinaryOp(
-                        Box::new(
-                            args.get(0)
-                                .cloned()
-                                .unwrap_or_else(|| Expression::Identifier("NONE".to_owned())),
+            Expression::Call(name, args) => {
+                let args = args.iter().map(|a| self.create_expression(a)).collect();
+                match &**name {
+                    Expression::Identifier(Ident::Function(i)) => match i {
+                        ReservedFunction::BigEndian => Expression::Call(
+                            Box::new(Expression::Identifier(Ident::from_path_vec(vec![
+                                "std",
+                                "core",
+                                "set_endian",
+                            ]))),
+                            vec![Expression::Identifier(Ident::from_path_vec(vec![
+                                "std", "mem", "Endian", "Big",
+                            ]))],
                         ),
-                        Punctuator::Assign,
-                        if args.len() > 2 {
-                            Box::new(Expression::Call(
-                                Box::new(Expression::Identifier("std::format".to_owned())),
-                                args[1..].to_vec(),
-                            ))
-                        } else if let Some(e) = args.get(1) {
-                            if matches!(e, Expression::Literal(Literal::String(_))) {
-                                Box::new(e.clone())
-                            } else {
+                        ReservedFunction::LittleEndian => Expression::Call(
+                            Box::new(Expression::Identifier(Ident::from_path_vec(vec![
+                                "std",
+                                "core",
+                                "set_endian",
+                            ]))),
+                            vec![Expression::Identifier(Ident::from_path_vec(vec![
+                                "std", "mem", "Endian", "Little",
+                            ]))],
+                        ),
+                        ReservedFunction::FEof => Expression::Call(
+                            Box::new(Expression::Identifier(Ident::from_path_vec(vec![
+                                "std", "mem", "eof",
+                            ]))),
+                            vec![],
+                        ),
+                        ReservedFunction::FTell => Expression::DollarOp,
+                        ReservedFunction::FileSize => Expression::Call(
+                            Box::new(Expression::Identifier(Ident::from_path_vec(vec![
+                                "std", "mem", "size",
+                            ]))),
+                            vec![],
+                        ),
+                        ReservedFunction::Printf => Expression::Call(
+                            Box::new(Expression::Identifier(Ident::from_path_vec(vec![
+                                "std", "print",
+                            ]))),
+                            args,
+                        ),
+                        ReservedFunction::Warning => Expression::Call(
+                            Box::new(Expression::Identifier(Ident::from_path_vec(vec![
+                                "std", "warning",
+                            ]))),
+                            args,
+                        ),
+                        ReservedFunction::SPrintf => Expression::BinaryOp(
+                            Box::new(args.get(0).cloned().unwrap_or_else(|| {
+                                Expression::Identifier(Ident::Custom("NONE".to_owned()))
+                            })),
+                            Punctuator::Assign,
+                            if args.len() > 2 {
                                 Box::new(Expression::Call(
-                                    Box::new(Expression::Identifier(
-                                        "std::string::to_string".to_owned(),
-                                    )),
-                                    vec![e.clone()],
+                                    Box::new(Expression::Identifier(Ident::from_path_vec(vec![
+                                        "std", "format",
+                                    ]))),
+                                    args[1..].to_vec(),
                                 ))
-                            }
-                        } else {
-                            Box::new(Expression::Literal(Literal::String(String::new())))
-                        },
-                    ),
-                    "Str" => Expression::Call(
-                        Box::new(Expression::Identifier("std::format".to_owned())),
-                        args.clone(),
-                    ),
-                    _ => src.clone(),
-                },
-                _ => src.clone(),
-            },
+                            } else if let Some(e) = args.get(1) {
+                                if matches!(e, Expression::Literal(Literal::String(_))) {
+                                    Box::new(e.clone())
+                                } else {
+                                    Box::new(Expression::Call(
+                                        Box::new(Expression::Identifier(Ident::from_path_vec(
+                                            vec!["std", "string", "to_string"],
+                                        ))),
+                                        vec![e.clone()],
+                                    ))
+                                }
+                            } else {
+                                Box::new(Expression::Literal(Literal::String(String::new())))
+                            },
+                        ),
+                        ReservedFunction::Str => Expression::Call(
+                            Box::new(Expression::Identifier(Ident::from_path_vec(vec![
+                                "std", "format",
+                            ]))),
+                            args,
+                        ),
+                        ReservedFunction::SetBackColor => {
+                            self.current_color = args.first().and_then(|e| match e {
+                                Expression::Identifier(Ident::Color(c)) => match c {
+                                    Color::None => None,
+                                    _ => Some(Literal::from(c)),
+                                },
+                                Expression::Literal(l) => Some(l.clone()),
+                                _ => None,
+                            });
+                            Expression::Comment(format!(
+                                "// SetBackColor({:?})",
+                                args.first()
+                                    .map_or_else(|| "None".to_owned(), |c| c.to_hexpat().unwrap())
+                            ))
+                        }
+                        ReservedFunction::FSeek => Expression::BinaryOp(
+                            Box::new(Expression::DollarOp),
+                            Punctuator::Assign,
+                            Box::new(args.first().unwrap().clone()),
+                        ),
+                        ReservedFunction::ReadByte
+                        | ReservedFunction::ReadDouble
+                        | ReservedFunction::ReadFloat
+                        | ReservedFunction::ReadHFloat
+                        | ReservedFunction::ReadInt
+                        | ReservedFunction::ReadInt64
+                        | ReservedFunction::ReadQuad
+                        | ReservedFunction::ReadShort
+                        | ReservedFunction::ReadUByte
+                        | ReservedFunction::ReadUInt
+                        | ReservedFunction::ReadUInt64
+                        | ReservedFunction::ReadUQuad
+                        | ReservedFunction::ReadUShort => {
+                            let address = args.first().unwrap_or_else(|| &Expression::DollarOp);
+                            let dt = match i {
+                                ReservedFunction::ReadByte => DataType::I8,
+                                ReservedFunction::ReadUByte => DataType::U8,
+                                ReservedFunction::ReadShort => DataType::I16,
+                                ReservedFunction::ReadUShort => DataType::U16,
+                                ReservedFunction::ReadInt => DataType::I32,
+                                ReservedFunction::ReadUInt => DataType::U32,
+                                ReservedFunction::ReadInt64 | ReservedFunction::ReadQuad => {
+                                    DataType::I64
+                                }
+                                ReservedFunction::ReadUInt64 | ReservedFunction::ReadUQuad => {
+                                    DataType::U64
+                                }
+                                ReservedFunction::ReadHFloat => DataType::F16,
+                                ReservedFunction::ReadFloat => DataType::F32,
+                                ReservedFunction::ReadDouble => DataType::F64,
+                                _ => panic!(),
+                            };
+                            let size = Expression::Literal(Literal::Decimal(
+                                dt.get_size_bytes().unwrap_or_default(),
+                            ));
+                            let func = if dt.is_signed() {
+                                Ident::from_path_vec(vec!["std", "mem", "read_signed"])
+                            } else {
+                                Ident::from_path_vec(vec!["std", "mem", "read_unsigned"])
+                            };
+                            Expression::Cast(
+                                Box::new(dt),
+                                Box::new(Expression::Call(
+                                    Box::new(Expression::Identifier(func)),
+                                    vec![address.clone(), size],
+                                )),
+                            )
+                        }
+                        ReservedFunction::RequiresVersion => Expression::Comment(format!(
+                            "// RequiresVersion({:?})",
+                            args.first()
+                                .map_or_else(|| "None".to_owned(), |c| c.to_hexpat().unwrap())
+                        )),
+                        _ => Expression::Call(name.clone(), args),
+                    },
+                    _ => Expression::Call(name.clone(), args),
+                }
+            }
             Expression::ArrayAccess(e, i) => Expression::ArrayAccess(
                 Box::new(self.create_expression(e)),
                 Box::new(self.create_expression(i)),
@@ -265,7 +415,7 @@ impl Translator {
         }
     }
 
-    fn create_datatype(&self, src: &DataType, dest: &mut Vec<Statement>) -> DataType {
+    fn create_datatype(&mut self, src: &DataType, dest: &mut Vec<Statement>) -> DataType {
         match src {
             DataType::Args(dt, e) => DataType::Args(
                 Box::new(self.create_datatype(dt, dest)),
@@ -277,22 +427,22 @@ impl Translator {
             ),
             DataType::Enum(e) => {
                 dest.push(Statement::EnumDef(self.create_enum(e)));
-                DataType::Ident(e.ident.clone().unwrap_or_else(|| "NONAME".to_owned()))
+                DataType::Ident(e.ident.clone().unwrap_or_default())
             }
             DataType::Struct(s) => {
                 let st = self.create_struct(s, dest);
                 dest.push(Statement::StructDef(st));
-                DataType::Ident(s.ident.clone().unwrap_or_else(|| "NONAME".to_owned()))
+                DataType::Ident(s.ident.clone().unwrap_or_default())
             }
             _ => src.clone(),
         }
     }
 
     fn create_typedef_datatype(
-        &self,
+        &mut self,
         src: &DataType,
         dest: &mut Vec<Statement>,
-        ident: &str,
+        ident: &Ident,
     ) -> Option<DataType> {
         match src {
             DataType::Args(dt, i) => self
@@ -320,7 +470,7 @@ impl Translator {
         }
     }
 
-    fn create_enum(&self, src: &Enum) -> Enum {
+    fn create_enum(&mut self, src: &Enum) -> Enum {
         Enum {
             ident: src.ident.clone(),
             ty: src.ty.clone(),
@@ -333,7 +483,7 @@ impl Translator {
         }
     }
 
-    fn create_struct(&self, src: &Struct, dest: &mut Vec<Statement>) -> Struct {
+    fn create_struct(&mut self, src: &Struct, dest: &mut Vec<Statement>) -> Struct {
         Struct {
             ty: src.ty.clone(),
             ident: src.ident.clone(),

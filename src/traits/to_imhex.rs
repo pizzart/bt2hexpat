@@ -33,6 +33,6 @@ pub trait ToHexpatStr {
     }
 
     fn indent(&self) -> &'static str {
-        "  "
+        "    "
     }
 }

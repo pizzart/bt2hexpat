@@ -1,13 +1,11 @@
-use std::fmt;
-
 use derive_more::Deref;
 
 use crate::{
     ast_bt::{
-        attr::{Attributes, Color},
+        attr::Attributes,
         data_type::DataType,
         literal::Literal,
-        token::Punctuator,
+        token::{Ident, Punctuator},
     },
     traits::to_imhex::{ToHexpatErr, ToHexpatStr},
 };
@@ -21,44 +19,16 @@ pub enum UnaryPosition {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expression {
     Literal(Literal),
-    Identifier(String),
+    Identifier(Ident),
     UnaryOp(Punctuator, Box<Expression>, UnaryPosition),
     BinaryOp(Box<Expression>, Punctuator, Box<Expression>),
     Call(Box<Expression>, Vec<Expression>),
     Cast(Box<DataType>, Box<Expression>),
-    FieldAccess(Box<Expression>, String),
+    FieldAccess(Box<Expression>, Ident),
     ArrayAccess(Box<Expression>, Box<Expression>),
+    Array(Vec<Expression>),
+    DollarOp,
     Comment(String),
-}
-
-impl fmt::Display for Expression {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Self::Literal(s) => s.to_string(),
-            Self::Identifier(s) => s.to_string(),
-            Self::UnaryOp(s, e, p) => match p {
-                UnaryPosition::Prefix => format!("{}{}", s, e),
-                UnaryPosition::Postfix => format!("{}{}", e, s),
-            },
-            Self::BinaryOp(l, s, r) => format!("{}{}{}", l, s, r),
-            Self::Call(i, e) => {
-                let mut out = format!("{}(", i);
-                for (i, expr) in e.iter().enumerate() {
-                    out.push_str(&expr.to_string());
-                    if i < e.len() - 1 {
-                        out.push_str(", ");
-                    }
-                }
-                out.push(')');
-                out
-            }
-            Self::Cast(dt, e) => format!("({}) {}", dt, e),
-            Self::FieldAccess(e, s) => format!("{}.{}", e, s),
-            Self::ArrayAccess(a, e) => format!("{}[{}]", a, e),
-            Self::Comment(s) => s.to_owned(),
-        };
-        write!(f, "{}", s)
-    }
 }
 
 impl ToHexpatStr for Expression {
@@ -66,12 +36,12 @@ impl ToHexpatStr for Expression {
         match self {
             Self::Literal(lit) => lit.to_hexpat(),
             Self::Identifier(var) => Ok(match var {
-                _ if let Ok(c) = var.parse::<Color>() => Literal::from(c).to_hexpat()?,
-                _ => var.to_owned(),
+                Ident::Color(c) => Literal::from(c).to_hexpat()?,
+                _ => var.to_hexpat()?,
             }),
             Self::UnaryOp(op, expr, pos) => match op {
-                Punctuator::Inc => Ok(format!("{} += 1", expr)),
-                Punctuator::Dec => Ok(format!("{} -= 1", expr)),
+                Punctuator::Inc => Ok(format!("{} += 1", expr.to_hexpat()?)),
+                Punctuator::Dec => Ok(format!("{} -= 1", expr.to_hexpat()?)),
                 _ => match pos {
                     UnaryPosition::Prefix => Ok(format!("{}{}", op, expr.to_hexpat()?)),
                     UnaryPosition::Postfix => Ok(format!("{}{}", expr.to_hexpat()?, op)),
@@ -96,13 +66,24 @@ impl ToHexpatStr for Expression {
                     .map(|a| a.to_hexpat())
                     .collect::<Result<Vec<_>, _>>()?
                     .join(", ");
-                Ok(format!("{}({})", name, args_str))
+                Ok(format!("{}({})", name.to_hexpat()?, args_str))
             }
             Self::Cast(ty, expr) => Ok(format!("{}({})", ty.to_hexpat()?, expr.to_hexpat()?)),
-            Self::FieldAccess(expr, field) => Ok(format!("{}.{}", expr.to_hexpat()?, field)),
+            Self::FieldAccess(expr, field) => {
+                Ok(format!("{}.{}", expr.to_hexpat()?, field.to_hexpat()?))
+            }
             Self::ArrayAccess(expr, index) => {
                 Ok(format!("{}[{}]", expr.to_hexpat()?, index.to_hexpat()?))
             }
+            Self::Array(array) => {
+                let elems = array
+                    .iter()
+                    .map(|a| a.to_hexpat())
+                    .collect::<Result<Vec<_>, _>>()?
+                    .join(", ");
+                Ok(format!("{{ {} }}", elems))
+            }
+            Self::DollarOp => Ok("$".to_owned()),
             Self::Comment(s) => Ok(s.to_owned()),
         }
     }
@@ -115,14 +96,14 @@ pub enum StructType {
 }
 
 #[derive(Debug, Clone, PartialEq, Deref)]
-pub struct Args(pub Vec<(DataType, String)>);
+pub struct Args(pub Vec<(DataType, Ident)>);
 
 impl Args {
     pub fn try_to_imhex_struct(&self) -> Result<String, ToHexpatErr> {
         let mut output = String::new();
         let mut iter = self.iter().peekable();
         while let Some((_, id)) = iter.next() {
-            output.push_str(&format!("auto {}", id));
+            output.push_str(&format!("auto {}", id.to_hexpat()?));
             if iter.peek().is_some() {
                 output.push_str(", ")
             }
@@ -136,7 +117,11 @@ impl ToHexpatStr for Args {
         let mut output = String::new();
         let mut iter = self.iter().peekable();
         while let Some((dt, id)) = iter.next() {
-            output.push_str(&format!("{} {}", dt.try_to_imhex_fn_arg()?, id));
+            output.push_str(&format!(
+                "{} {}",
+                dt.try_to_imhex_fn_arg()?,
+                id.to_hexpat()?
+            ));
             if iter.peek().is_some() {
                 output.push_str(", ")
             }
@@ -148,7 +133,7 @@ impl ToHexpatStr for Args {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Struct {
     pub ty: StructType,
-    pub ident: Option<String>,
+    pub ident: Option<Ident>,
     pub args: Args,
     pub body: Block,
     pub attrs: Attributes,
@@ -158,7 +143,7 @@ impl ToHexpatStr for Struct {
     fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
         if self.body.is_empty() {
             if let Some(ref i) = self.ident {
-                Ok(format!("using {}", i))
+                Ok(format!("using {}", i.to_hexpat()?))
             } else {
                 Ok(String::new())
             }
@@ -184,7 +169,7 @@ impl ToHexpatStr for Struct {
                         StructType::Struct => "struct",
                     }
                 },
-                self.ident.clone().unwrap_or_else(|| "NONAME".to_string()),
+                self.ident.clone().unwrap_or_default().to_hexpat()?,
                 if !self.args.is_empty() {
                     format!("<{}>", self.args.try_to_imhex_struct()?)
                 } else {
@@ -199,9 +184,9 @@ impl ToHexpatStr for Struct {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Enum {
-    pub ident: Option<String>,
+    pub ident: Option<Ident>,
     pub ty: Option<DataType>,
-    pub variants: Vec<(String, Option<Expression>)>,
+    pub variants: Vec<(Ident, Option<Expression>)>,
     pub attrs: Attributes,
 }
 
@@ -209,16 +194,16 @@ impl ToHexpatStr for Enum {
     fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
         let mut output = format!(
             "enum {} : {} {{\n",
-            self.ident.clone().unwrap_or_default(),
+            self.ident.clone().unwrap_or_default().to_hexpat()?,
             self.ty
                 .as_ref()
                 .map_or_else(|| Ok("u32".to_string()), |t| t.to_hexpat())?
         );
 
         for (var_name, value) in &self.variants {
-            output.push_str(&self.with_indent(var_name));
+            output.push_str(&self.with_indent(&var_name.to_hexpat()?));
             if let Some(v) = value {
-                output.push_str(&format!(" = {}", v));
+                output.push_str(&format!(" = {}", v.to_hexpat()?));
             }
             output.push_str(",\n");
         }
@@ -245,7 +230,7 @@ impl ToHexpatStr for Block {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Statement {
     VarDef {
-        ident: String,
+        ident: Ident,
         ty: DataType,
         value: Option<Expression>,
         local: bool,
@@ -256,13 +241,13 @@ pub enum Statement {
     StructDef(Struct),
     EnumDef(Enum),
     TypeDef {
-        ident: String,
+        ident: Ident,
         ty: DataType,
         attrs: Attributes,
     },
     FnDef {
         ty: DataType,
-        ident: String,
+        ident: Ident,
         args: Args,
         body: Block,
     },
@@ -329,7 +314,7 @@ impl ToHexpatStr for Statement {
             Statement::EnumDef(e) => e.to_hexpat(),
             Statement::TypeDef { ident, ty, attrs } => Ok(format!(
                 "using {} = {}{}",
-                ident,
+                ident.to_hexpat()?,
                 ty.try_to_imhex_array()?,
                 attrs.try_to_imhex_whitespace()?
             )),
@@ -348,7 +333,7 @@ impl ToHexpatStr for Statement {
                 } else if bits.is_some() && ty.is_int() && ty.is_signed() {
                     output.push_str("signed ");
                 }
-                output.push_str(ident);
+                output.push_str(&ident.to_hexpat()?);
 
                 if let DataType::Array(_, size) = ty {
                     if let Some(size_expr) = size {
@@ -379,7 +364,7 @@ impl ToHexpatStr for Statement {
                 body: block,
             } => Ok(format!(
                 "fn {}({}) {}",
-                ident,
+                ident.to_hexpat()?,
                 args.to_hexpat()?,
                 block.to_hexpat()?
             )),

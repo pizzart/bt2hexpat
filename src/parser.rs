@@ -7,9 +7,9 @@ use std::collections::VecDeque;
 pub enum ParseErrorType {
     #[error("reached end of token stream")]
     Eof,
-    #[error("expected {0} ({0:?}), found {1}")]
+    #[error("expected {0:#?}, found {1:#?}")]
     Expect(TokenKind, TokenKind),
-    #[error("expected any of {0:?}, found {1}")]
+    #[error("expected any of {0:#?}, found {1:#?}")]
     ExpectAny(Vec<TokenKind>, TokenKind),
     #[error("{0}")]
     Other(String),
@@ -114,7 +114,7 @@ impl Parser {
         eprintln!("[DEBUG] Parsing typedef type alias");
 
         let ident = self.parse_ident()?;
-        eprintln!("[DEBUG] Typedef name: {}", ident);
+        eprintln!("[DEBUG] Typedef name: {:#?}", ident);
 
         let mut ty = base_ty;
         while self.peek_token()? == &Punctuator::LBracket {
@@ -158,6 +158,7 @@ impl Parser {
         eprintln!("[DEBUG] Parsing struct: {:?}", ident);
 
         let args = if self.peek_token()? == &Punctuator::LParen {
+            self.advance()?;
             let args = self.parse_args()?;
             self.expect(Punctuator::RParen)?;
             args
@@ -199,10 +200,15 @@ impl Parser {
         self.expect(Punctuator::LAngledBracket)?;
         let mut attrs = vec![];
         while self.peek_token()? != &Punctuator::RAngledBracket {
-            let ty = self
-                .read_token()?
-                .as_attribute()
-                .map_err(|e| ParseErrorType::Other(e))?;
+            let ty = match self.read_token()? {
+                TokenKind::Ident(Ident::Attribute(t)) => t,
+                _ => {
+                    return Err(ParseErrorType::Other(format!(
+                        "wrong token, expected attribute type, got {}",
+                        self.get_token_string_before(1)?
+                    )));
+                }
+            };
             self.expect(Punctuator::Assign)?;
             let value = self.parse_primary_expr()?;
             attrs.push(Attribute { ty, value });
@@ -230,7 +236,7 @@ impl Parser {
             None
         };
 
-        let ident = token.ident().ok().map(|s| s.to_owned());
+        let ident = token.ident().ok();
         eprintln!("[DEBUG] Parsing enum: {:?}", ident);
 
         token = self.read_token()?;
@@ -244,7 +250,7 @@ impl Parser {
 
         while self.peek_token()? != &Punctuator::RBrace {
             let variant_name = self.parse_ident()?;
-            eprintln!("[DEBUG] Enum variant: {}", variant_name);
+            eprintln!("[DEBUG] Enum variant: {:#?}", variant_name);
 
             let value = if self.peek_token()? == &Punctuator::Assign {
                 self.advance()?;
@@ -276,20 +282,18 @@ impl Parser {
         })
     }
 
-    fn parse_ident(&mut self) -> ParseResult<String> {
+    fn parse_ident(&mut self) -> ParseResult<Ident> {
         Ok(self
             .read_token()?
             .ident()
-            .map_err(|s| ParseErrorType::Other(s))?
-            .to_owned())
+            .map_err(|s| ParseErrorType::Other(s))?)
     }
 
     fn parse_var_or_fn_def(&mut self) -> ParseResult<Vec<Statement>> {
         let pos = self.pos;
         match self.parse_var_def(false) {
             Ok(d) => Ok(d),
-            Err(e) => {
-                dbg!(e);
+            Err(_) => {
                 self.pos = pos;
                 self.parse_fn_def().map(|s| vec![s])
             }
@@ -550,13 +554,14 @@ impl Parser {
                 _ => {
                     return Err(ParseErrorType::Other(format!(
                         "invalid token encountered in switch statement, expected case or default, got {}",
-                        token
+                        self.get_token_string_before(1)?
                     )));
                 }
             }
         }
 
         self.expect(Punctuator::RBrace)?;
+        self.optional(Punctuator::Semicolon)?;
         eprintln!("[DEBUG] Exiting switch block");
 
         Ok(Statement::Switch {
@@ -582,7 +587,10 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> ParseResult<Statement> {
         let token = self.peek_token()?;
-        eprintln!("[DEBUG] parse_statement: token = '{}'", token);
+        eprintln!(
+            "[DEBUG] parse_statement: token = '{}'",
+            self.get_token_string()?
+        );
 
         match token {
             TokenKind::Keyword(Keyword::If) => self.parse_if(),
@@ -645,7 +653,12 @@ impl Parser {
             }
             TokenKind::Keyword(Keyword::DataType(dt)) => dt,
             TokenKind::Ident(i) => DataType::Ident(i),
-            t => return Err(ParseErrorType::Other(format!("Nonsense datatype {}", t))),
+            _ => {
+                return Err(ParseErrorType::Other(format!(
+                    "Nonsense datatype {}",
+                    self.get_token_string_before(1)?
+                )));
+            }
         };
 
         if self.peek_token()? == &Punctuator::Ampersand {
@@ -721,19 +734,14 @@ impl Parser {
                     UnaryPosition::Prefix,
                 ))
             }
-            TokenKind::Keyword(s @ Keyword::Sizeof) => {
-                let s = s.to_string();
-                self.expect(Punctuator::LParen)?;
-                let arg = self.parse_expr()?;
-                self.expect(Punctuator::RParen)?;
-                Ok(Expression::Call(
-                    Box::new(Expression::Identifier(s)),
-                    vec![arg],
-                ))
-            }
-            TokenKind::Keyword(Keyword::Color(c)) => {
-                let s = c.to_string();
-                Ok(Expression::Identifier(s))
+            TokenKind::Punc(Punctuator::LBrace) => {
+                let mut elements = vec![];
+                while self.peek_token()? != &Punctuator::RBrace {
+                    elements.push(self.parse_expr()?);
+                    self.optional(Punctuator::Comma)?;
+                }
+                self.expect(Punctuator::RBrace)?;
+                Ok(Expression::Array(elements))
             }
             TokenKind::Ident(s) => {
                 let mut left = Expression::Identifier(s);
@@ -778,7 +786,7 @@ impl Parser {
             }
             _ => Err(ParseErrorType::Other(format!(
                 "invalid starting token {} for expression",
-                token
+                self.get_token_string_before(1)?
             ))),
         }
     }
@@ -874,6 +882,17 @@ impl Parser {
         }
     }
 
+    fn get_token_string(&self) -> ParseResult<&str> {
+        self.get_token_string_before(0)
+    }
+
+    fn get_token_string_before(&self, before: usize) -> ParseResult<&str> {
+        self.tokens
+            .get(self.pos - before)
+            .map(|(_, s)| s.as_str())
+            .ok_or(ParseErrorType::Eof)
+    }
+
     fn peek_token(&self) -> ParseResult<&TokenKind> {
         self.peek_token_after(0)
     }
@@ -925,7 +944,9 @@ impl Parser {
     {
         let token: TokenKind = expected.into();
 
-        if self.peek_token()? == &token {
+        if let Ok(t) = self.peek_token()
+            && t == &token
+        {
             self.read_token()?;
         }
         Ok(())

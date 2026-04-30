@@ -7,7 +7,7 @@ use crate::{
 };
 
 str_enum! {
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum AttributeType {
         Format => "format",
         FgColor => "fgcolor",
@@ -30,7 +30,33 @@ str_enum! {
 }
 
 str_enum! {
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum DisplayFormat {
+        Hex => "hex",
+        Decimal => "decimal",
+        Binary => "binary",
+        Octal => "octal",
+        DecimalHex => "decimalhex",
+    }
+}
+
+impl From<&DisplayFormat> for Literal {
+    fn from(value: &DisplayFormat) -> Self {
+        Literal::String(
+            match value {
+                DisplayFormat::Binary => "type::impl::format_bin",
+                DisplayFormat::Decimal => "type::impl::format_dec",
+                DisplayFormat::DecimalHex => "type::impl::format_dec",
+                DisplayFormat::Hex => "type::impl::format_hex",
+                DisplayFormat::Octal => "type::impl::format_oct",
+            }
+            .to_owned(),
+        )
+    }
+}
+
+str_enum! {
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub enum Color {
         Black => "cBlack",
         Red => "cRed",
@@ -60,8 +86,8 @@ str_enum! {
     }
 }
 
-impl From<Color> for Literal {
-    fn from(value: Color) -> Self {
+impl From<&Color> for Literal {
+    fn from(value: &Color) -> Self {
         Literal::String(
             match value {
                 Color::Black => "000000",
@@ -106,6 +132,7 @@ pub enum ImhexAttribute {
     Color(Expression),
     Comment(Expression),
     Name(Expression),
+    Format(Expression),
     Hidden,
 }
 
@@ -121,9 +148,10 @@ impl ToHexpatStr for ImhexAttributes {
             let mut iter = self.iter().peekable();
             while let Some(attr) = iter.next() {
                 let a = match attr {
-                    ImhexAttribute::Color(c) => format!("color(\"{}\")", c.to_hexpat()?),
+                    ImhexAttribute::Color(c) => format!("color({})", c.to_hexpat()?),
                     ImhexAttribute::Comment(c) => format!("comment({})", c.to_hexpat()?),
                     ImhexAttribute::Name(n) => format!("name({})", n.to_hexpat()?),
+                    ImhexAttribute::Format(n) => format!("format({})", n.to_hexpat()?),
                     ImhexAttribute::Hidden => "hidden".to_owned(),
                 };
                 output.push_str(&a);
@@ -141,6 +169,10 @@ impl ToHexpatStr for ImhexAttributes {
 pub struct Attributes(pub Vec<Attribute>);
 
 impl Attributes {
+    pub fn contains_type(&self, ty: &AttributeType) -> bool {
+        self.iter().any(|attr| &attr.ty == ty)
+    }
+
     pub fn try_to_imhex_whitespace(&self) -> Result<String, ToHexpatErr> {
         let attrs = self.to_imhex_attrs();
         if attrs.is_empty() {
@@ -157,6 +189,7 @@ impl Attributes {
                     AttributeType::BgColor => Some(ImhexAttribute::Color(attr.value.clone())),
                     AttributeType::Comment => Some(ImhexAttribute::Comment(attr.value.clone())),
                     AttributeType::Name => Some(ImhexAttribute::Name(attr.value.clone())),
+                    // AttributeType::Format => Some(ImhexAttribute::Format(attr.value.clone())),
                     AttributeType::Hidden => Some(ImhexAttribute::Hidden),
                     _ => None,
                 })

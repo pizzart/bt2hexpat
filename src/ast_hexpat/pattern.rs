@@ -13,6 +13,8 @@ impl ToHexpatStr for HexPattern {
         output.push_str("\nimport std.array;\n");
         output.push_str("import std.mem;\n");
         output.push_str("import std.io;\n");
+        output.push_str("import std.core;\n");
+        output.push_str("import std.string;\n");
         output.push_str("import type.float16;\n");
         output.push_str("import type.guid;\n");
         output.push_str("import type.time;\n\n");

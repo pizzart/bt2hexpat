@@ -1,7 +1,10 @@
-use std::{fmt, str::FromStr};
+use std::str::FromStr;
 
 use crate::{
-    ast_bt::stmt::{Enum, Expression, Struct},
+    ast_bt::{
+        stmt::{Enum, Expression, Struct},
+        token::Ident,
+    },
     traits::to_imhex::{ToHexpatErr, ToHexpatStr},
 };
 
@@ -18,9 +21,10 @@ pub enum DataType {
     U32,
     I64,
     U64,
-    HFloat,
-    Float,
-    Double,
+    F16,
+    F32,
+    F64,
+    Char,
     DosDate,
     DosTime,
     FileTime,
@@ -32,11 +36,20 @@ pub enum DataType {
     Struct(Struct),
     Enum(Box<Enum>),
     Pointer(Box<DataType>),
-    Ident(String),
+    Ident(Ident),
     Args(Box<DataType>, Vec<Expression>),
 }
 
 impl DataType {
+    pub fn get_size_bytes(&self) -> Option<usize> {
+        match self {
+            Self::I8 | Self::U8 => Some(1),
+            Self::I16 | Self::U16 | Self::F16 => Some(2),
+            Self::I32 | Self::U32 | Self::F32 => Some(4),
+            Self::I64 | Self::U64 | Self::F64 => Some(4),
+            _ => None,
+        }
+    }
     pub fn is_int(&self) -> bool {
         matches!(
             self,
@@ -95,61 +108,12 @@ impl DataType {
     }
 }
 
-impl fmt::Display for DataType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = match self {
-            Self::I8 => "int8",
-            Self::U8 => "uint8",
-            Self::I16 => "int16",
-            Self::U16 => "uint16",
-            Self::I32 => "int32",
-            Self::U32 => "uint32",
-            Self::I64 => "int64",
-            Self::U64 => "uint64",
-            Self::HFloat => "hfloat",
-            Self::Float => "float",
-            Self::Double => "double",
-            Self::DosDate => "DOSDATE",
-            Self::DosTime => "DOSTIME",
-            Self::FileTime => "FILETIME",
-            Self::TimeT => "time_t",
-            Self::Time64T => "time_64_t",
-            Self::Guid => "GUID",
-            Self::String => "string",
-            Self::Array(dt, size) => &format!(
-                "{}{}",
-                dt,
-                match size {
-                    Some(e) => format!("[{}]", e),
-                    None => "[]".to_string(),
-                }
-            ),
-            Self::Struct(s) => &format!(
-                "struct {} {{\n{}}}",
-                s.ident.as_deref().unwrap_or("NONAME"),
-                s.body
-                    .iter()
-                    .fold(String::new(), |a, _| format!("{}{}", a, "structitem\n"))
-            ),
-            Self::Enum(e) => &format!(
-                "enum <{}> {} {{}}",
-                e.ty.as_ref().map(|e| e.to_string()).unwrap_or_default(),
-                e.ident.clone().unwrap_or_else(|| "NONAME".to_string())
-            ),
-            Self::Pointer(dt) => &format!("&{}", dt),
-            Self::Ident(s) => s,
-            Self::Args(s, args) => &format!("{}({:?})", s, args),
-        };
-        write!(f, "{}", s)
-    }
-}
-
 impl FromStr for DataType {
     type Err = ParseDataTypeErr;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "char" | "byte" | "int8" => Ok(Self::I8),
+            "byte" | "int8" => Ok(Self::I8),
             "uchar" | "ubyte" | "uint8" => Ok(Self::U8),
             "short" | "int16" => Ok(Self::I16),
             "ushort" | "uint16" | "word" => Ok(Self::U16),
@@ -157,9 +121,10 @@ impl FromStr for DataType {
             "uint" | "uint32" | "ulong" | "dword" => Ok(Self::U32),
             "int64" | "__int64" | "quad" => Ok(Self::I64),
             "uint64" | "__uint64" | "uquad" | "qword" => Ok(Self::U64),
-            "hfloat" => Ok(Self::HFloat),
-            "float" => Ok(Self::Float),
-            "double" => Ok(Self::Double),
+            "hfloat" => Ok(Self::F16),
+            "float" => Ok(Self::F32),
+            "double" => Ok(Self::F64),
+            "char" => Ok(Self::Char),
             "dosdate" => Ok(Self::DosDate),
             "dostime" => Ok(Self::DosTime),
             "filetime" => Ok(Self::FileTime),
@@ -183,9 +148,10 @@ impl ToHexpatStr for DataType {
             Self::U32 => Ok("u32".to_owned()),
             Self::I64 => Ok("s64".to_owned()),
             Self::U64 => Ok("u64".to_owned()),
-            Self::Float => Ok("float".to_owned()),
-            Self::Double => Ok("double".to_owned()),
-            Self::HFloat => Ok("type::float16".to_owned()),
+            Self::F16 => Ok("type::float16".to_owned()),
+            Self::F32 => Ok("float".to_owned()),
+            Self::F64 => Ok("double".to_owned()),
+            Self::Char => Ok("char".to_owned()),
             Self::DosDate => Ok("type::DOSDate".to_owned()),
             Self::DosTime => Ok("type::DOSTime".to_owned()),
             Self::FileTime => Ok("type::FILETIME".to_owned()),
@@ -196,15 +162,15 @@ impl ToHexpatStr for DataType {
             Self::Struct(s) => s.to_hexpat(),
             Self::Enum(e) => e.to_hexpat(),
             Self::Array(base_ty, _) => base_ty.to_hexpat(),
-            Self::Pointer(dt) => Ok(format!("{} &", dt.to_hexpat()?)),
-            Self::Ident(name) => Ok(name.clone()),
+            Self::Pointer(dt) => Ok(format!("ref {}", dt.to_hexpat()?)),
+            Self::Ident(name) => Ok(name.to_hexpat()?),
             Self::Args(name, args) => {
                 let args_str = args
                     .iter()
                     .map(|a| a.to_hexpat())
                     .collect::<Result<Vec<_>, _>>()?
                     .join(", ");
-                Ok(format!("{}<{}>", name, args_str))
+                Ok(format!("{}<{}>", name.to_hexpat()?, args_str))
             }
         }
     }
