@@ -1,18 +1,18 @@
 use std::{error::Error, fmt};
 
 #[derive(Debug)]
-pub struct ToImhexErr;
+pub struct ToHexpatErr;
 
-impl Error for ToImhexErr {}
+impl Error for ToHexpatErr {}
 
-impl fmt::Display for ToImhexErr {
+impl fmt::Display for ToHexpatErr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "failed translating binary template to hexpat")
     }
 }
 
-pub trait ToImhex {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr>;
+pub trait ToHexpatStr {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr>;
     fn with_indent(&self, s: &str) -> String {
         s.split_inclusive('\n')
             .map(|l| self.indent().to_owned() + l)

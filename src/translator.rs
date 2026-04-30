@@ -7,7 +7,8 @@ use crate::{
         template::*,
         token::Punctuator,
     },
-    traits::to_imhex::{ToImhex, ToImhexErr},
+    ast_hexpat::pattern::HexPattern,
+    traits::to_imhex::{ToHexpatErr, ToHexpatStr},
 };
 
 pub struct Translator {
@@ -21,7 +22,7 @@ impl Translator {
         }
     }
 
-    pub fn translate(&mut self, template: &Template) -> Result<String, ToImhexErr> {
+    pub fn translate(&mut self, template: &BinaryTemplate) -> Result<String, ToHexpatErr> {
         let mut def_stmts = vec![];
         let mut stmts = self.create_statements(&template.statements, &mut def_stmts);
         let mut after_onelines = 0;
@@ -43,11 +44,8 @@ impl Translator {
         for stmt in def_stmts {
             stmts.insert(after_onelines, stmt);
         }
-        let pat = Template {
-            metadata: template.metadata.clone(),
-            statements: stmts,
-        };
-        pat.try_to_imhex()
+        let pat = HexPattern(stmts);
+        pat.to_hexpat()
     }
 
     fn create_statements(&self, src: &Vec<Statement>, dest: &mut Vec<Statement>) -> Vec<Statement> {

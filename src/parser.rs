@@ -38,14 +38,14 @@ impl Parser {
         context
     }
 
-    pub fn parse(&mut self) -> ParseResult<Template> {
+    pub fn parse(&mut self) -> ParseResult<BinaryTemplate> {
         let mut statements = Vec::new();
 
         while !self.is_eof() {
             statements.append(&mut self.parse_def_or_stmt()?);
         }
 
-        Ok(Template {
+        Ok(BinaryTemplate {
             statements,
             metadata: TemplateMetadata::default(),
         })
@@ -150,7 +150,7 @@ impl Parser {
             _ => panic!(),
         };
 
-        let ident = if let TokenKind::Ident(i) = self.peek_token()? {
+        let ident = if let TokenKind::Ident(_) = self.peek_token()? {
             Some(self.parse_ident()?)
         } else {
             None

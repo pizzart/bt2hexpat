@@ -2,6 +2,8 @@ use std::{fmt, str::FromStr};
 
 use thiserror::Error;
 
+use crate::traits::to_imhex::{ToHexpatErr, ToHexpatStr};
+
 #[derive(Debug, Error)]
 pub enum ParseLiteralErr {
     #[error("{0}")]
@@ -180,5 +182,20 @@ impl FromStr for Literal {
             _ => return Err(ParseLiteralErr::InvalidLiteral),
         };
         Ok(literal)
+    }
+}
+
+impl ToHexpatStr for Literal {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
+        Ok(match self {
+            Literal::Binary(b) => format!("0b{:b}", b),
+            Literal::Decimal(d) => d.to_string(),
+            Literal::Hexadecimal(h) => format!("0x{:x}", h),
+            Literal::Octal(o) => format!("0o{:o}", o),
+            Literal::Float(f) => format!("{}F", f),
+            Literal::Double(d) => format!("{}D", d),
+            Literal::Char(c) => format!("'{}'", c),
+            Literal::String(s) => format!("\"{}\"", s),
+        })
     }
 }

@@ -9,7 +9,7 @@ use crate::{
         literal::Literal,
         token::Punctuator,
     },
-    traits::to_imhex::{ToImhex, ToImhexErr},
+    traits::to_imhex::{ToHexpatErr, ToHexpatStr},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,59 +61,48 @@ impl fmt::Display for Expression {
     }
 }
 
-impl ToImhex for Expression {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+impl ToHexpatStr for Expression {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
         match self {
-            Self::Literal(lit) => match lit {
-                Literal::Binary(b) => Ok(format!("0b{:b}", b)),
-                Literal::Decimal(d) => Ok(d.to_string()),
-                Literal::Hexadecimal(h) => Ok(format!("0x{:x}", h)),
-                Literal::Octal(o) => Ok(format!("0o{:o}", o)),
-                Literal::Float(f) => Ok(format!("{}F", f)),
-                Literal::Double(d) => Ok(format!("{}D", d)),
-                Literal::Char(c) => Ok(format!("'{}'", c)),
-                Literal::String(s) => Ok(format!("\"{}\"", s)),
-            },
+            Self::Literal(lit) => lit.to_hexpat(),
             Self::Identifier(var) => Ok(match var {
-                _ if let Ok(c) = var.parse::<Color>() => c.try_to_imhex()?,
+                _ if let Ok(c) = var.parse::<Color>() => Literal::from(c).to_hexpat()?,
                 _ => var.to_owned(),
             }),
             Self::UnaryOp(op, expr, pos) => match op {
                 Punctuator::Inc => Ok(format!("{} += 1", expr)),
                 Punctuator::Dec => Ok(format!("{} -= 1", expr)),
                 _ => match pos {
-                    UnaryPosition::Prefix => Ok(format!("{}{}", op, expr.try_to_imhex()?)),
-                    UnaryPosition::Postfix => Ok(format!("{}{}", expr.try_to_imhex()?, op)),
+                    UnaryPosition::Prefix => Ok(format!("{}{}", op, expr.to_hexpat()?)),
+                    UnaryPosition::Postfix => Ok(format!("{}{}", expr.to_hexpat()?, op)),
                 },
             },
             Self::BinaryOp(left, op, right) => Ok(format!(
                 "{} {} {}",
                 match **left {
-                    Self::BinaryOp(_, _, _) => format!("({})", left.try_to_imhex()?),
-                    _ => left.try_to_imhex()?,
+                    Self::BinaryOp(_, _, _) => format!("({})", left.to_hexpat()?),
+                    _ => left.to_hexpat()?,
                 },
                 op,
                 match **right {
-                    Self::BinaryOp(_, _, _) => format!("({})", right.try_to_imhex()?),
-                    _ => right.try_to_imhex()?,
+                    Self::BinaryOp(_, _, _) => format!("({})", right.to_hexpat()?),
+                    _ => right.to_hexpat()?,
                 },
             )),
             Self::Call(name, args) => {
-                let mut name = name.clone();
+                let name = name.clone();
                 let args_str = args
                     .iter()
-                    .map(|a| a.try_to_imhex())
+                    .map(|a| a.to_hexpat())
                     .collect::<Result<Vec<_>, _>>()?
                     .join(", ");
                 Ok(format!("{}({})", name, args_str))
             }
-            Self::Cast(ty, expr) => Ok(format!("{}({})", ty.try_to_imhex()?, expr.try_to_imhex()?)),
-            Self::FieldAccess(expr, field) => Ok(format!("{}.{}", expr.try_to_imhex()?, field)),
-            Self::ArrayAccess(expr, index) => Ok(format!(
-                "{}[{}]",
-                expr.try_to_imhex()?,
-                index.try_to_imhex()?
-            )),
+            Self::Cast(ty, expr) => Ok(format!("{}({})", ty.to_hexpat()?, expr.to_hexpat()?)),
+            Self::FieldAccess(expr, field) => Ok(format!("{}.{}", expr.to_hexpat()?, field)),
+            Self::ArrayAccess(expr, index) => {
+                Ok(format!("{}[{}]", expr.to_hexpat()?, index.to_hexpat()?))
+            }
             Self::Comment(s) => Ok(s.to_owned()),
         }
     }
@@ -129,7 +118,7 @@ pub enum StructType {
 pub struct Args(pub Vec<(DataType, String)>);
 
 impl Args {
-    pub fn try_to_imhex_struct(&self) -> Result<String, ToImhexErr> {
+    pub fn try_to_imhex_struct(&self) -> Result<String, ToHexpatErr> {
         let mut output = String::new();
         let mut iter = self.iter().peekable();
         while let Some((_, id)) = iter.next() {
@@ -142,8 +131,8 @@ impl Args {
     }
 }
 
-impl ToImhex for Args {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+impl ToHexpatStr for Args {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
         let mut output = String::new();
         let mut iter = self.iter().peekable();
         while let Some((dt, id)) = iter.next() {
@@ -165,8 +154,8 @@ pub struct Struct {
     pub attrs: Attributes,
 }
 
-impl ToImhex for Struct {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+impl ToHexpatStr for Struct {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
         if self.body.is_empty() {
             if let Some(ref i) = self.ident {
                 Ok(format!("using {}", i))
@@ -201,7 +190,7 @@ impl ToImhex for Struct {
                 } else {
                     String::new()
                 },
-                self.body.try_to_imhex()?,
+                self.body.to_hexpat()?,
                 self.attrs.try_to_imhex_whitespace()?
             ))
         }
@@ -216,14 +205,14 @@ pub struct Enum {
     pub attrs: Attributes,
 }
 
-impl ToImhex for Enum {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+impl ToHexpatStr for Enum {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
         let mut output = format!(
             "enum {} : {} {{\n",
             self.ident.clone().unwrap_or_default(),
             self.ty
                 .as_ref()
-                .map_or_else(|| Ok("u32".to_string()), |t| t.try_to_imhex())?
+                .map_or_else(|| Ok("u32".to_string()), |t| t.to_hexpat())?
         );
 
         for (var_name, value) in &self.variants {
@@ -242,11 +231,11 @@ impl ToImhex for Enum {
 #[derive(Debug, Clone, PartialEq, Deref)]
 pub struct Block(pub Vec<Statement>);
 
-impl ToImhex for Block {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+impl ToHexpatStr for Block {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
         let mut output = String::from("{\n");
         for stmt in self.iter() {
-            output.push_str(&self.with_indent(&(stmt.try_to_imhex()? + "\n")));
+            output.push_str(&self.with_indent(&(stmt.to_hexpat()? + "\n")));
         }
         output.push('}');
         Ok(output)
@@ -333,11 +322,11 @@ impl Statement {
     }
 }
 
-impl ToImhex for Statement {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+impl ToHexpatStr for Statement {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
         let s = match self {
-            Statement::StructDef(s) => s.try_to_imhex(),
-            Statement::EnumDef(e) => e.try_to_imhex(),
+            Statement::StructDef(s) => s.to_hexpat(),
+            Statement::EnumDef(e) => e.to_hexpat(),
             Statement::TypeDef { ident, ty, attrs } => Ok(format!(
                 "using {} = {}{}",
                 ident,
@@ -355,7 +344,7 @@ impl ToImhex for Statement {
             } => {
                 let mut output = String::new();
                 if bits.is_none() || matches!(ty, DataType::Enum(_) | DataType::Ident(_)) {
-                    output.push_str(&(ty.try_to_imhex()? + " "));
+                    output.push_str(&(ty.to_hexpat()? + " "));
                 } else if bits.is_some() && ty.is_int() && ty.is_signed() {
                     output.push_str("signed ");
                 }
@@ -363,19 +352,19 @@ impl ToImhex for Statement {
 
                 if let DataType::Array(_, size) = ty {
                     if let Some(size_expr) = size {
-                        output.push_str(&format!("[{}]", size_expr.try_to_imhex()?));
+                        output.push_str(&format!("[{}]", size_expr.to_hexpat()?));
                     } else {
                         output.push_str("[]");
                     }
                 }
                 if let Some(expr) = value {
-                    output.push_str(&format!(" = {}", expr.try_to_imhex()?));
+                    output.push_str(&format!(" = {}", expr.to_hexpat()?));
                 }
                 if let Some(b) = bits {
                     output.push_str(&format!(" : {}", b));
                 }
                 if let Some(p) = pos {
-                    output.push_str(&format!(" @ {}", p.try_to_imhex()?));
+                    output.push_str(&format!(" @ {}", p.to_hexpat()?));
                 }
                 if !attrs.is_empty() {
                     output.push_str(&attrs.try_to_imhex_whitespace()?);
@@ -391,10 +380,10 @@ impl ToImhex for Statement {
             } => Ok(format!(
                 "fn {}({}) {}",
                 ident,
-                args.try_to_imhex()?,
-                block.try_to_imhex()?
+                args.to_hexpat()?,
+                block.to_hexpat()?
             )),
-            Statement::Expr(expr) => expr.try_to_imhex(),
+            Statement::Expr(expr) => expr.to_hexpat(),
             Statement::If {
                 condition,
                 then_block,
@@ -402,15 +391,15 @@ impl ToImhex for Statement {
             } => {
                 let mut output = format!(
                     "if ({}) {}",
-                    condition.try_to_imhex()?,
-                    then_block.try_to_imhex()?
+                    condition.to_hexpat()?,
+                    then_block.to_hexpat()?
                 );
 
                 if let Some(else_stmts) = else_block {
                     output.push_str(" else ");
                     match else_stmts.first() {
-                        Some(s @ Statement::If { .. }) => output.push_str(&s.try_to_imhex()?),
-                        _ => output.push_str(&else_stmts.try_to_imhex()?),
+                        Some(s @ Statement::If { .. }) => output.push_str(&s.to_hexpat()?),
+                        _ => output.push_str(&else_stmts.to_hexpat()?),
                     }
                 }
 
@@ -418,8 +407,8 @@ impl ToImhex for Statement {
             }
             Statement::While { condition, body } => Ok(format!(
                 "while ({}) {}",
-                condition.try_to_imhex()?,
-                body.try_to_imhex()?
+                condition.to_hexpat()?,
+                body.to_hexpat()?
             )),
             Statement::For {
                 init,
@@ -428,15 +417,15 @@ impl ToImhex for Statement {
                 body,
             } => Ok(format!(
                 "for ({}, {}, {}) {}",
-                init.try_to_imhex()?,
-                test.try_to_imhex()?,
-                upd.try_to_imhex()?,
-                body.try_to_imhex()?
+                init.to_hexpat()?,
+                test.to_hexpat()?,
+                upd.to_hexpat()?,
+                body.to_hexpat()?
             )),
-            Statement::Block(block) => block.try_to_imhex(),
+            Statement::Block(block) => block.to_hexpat(),
             Statement::Return(expr) => expr.as_ref().map_or_else(
                 || Ok("return".to_owned()),
-                |e| Ok(format!("return {}", e.try_to_imhex()?)),
+                |e| Ok(format!("return {}", e.to_hexpat()?)),
             ),
             Statement::Break => Ok("break".to_owned()),
             Statement::Continue => Ok("continue".to_owned()),
@@ -445,9 +434,9 @@ impl ToImhex for Statement {
                 cases,
                 default,
             } => {
-                let mut output = format!("match ({}) {{\n", expr.try_to_imhex()?);
+                let mut output = format!("match ({}) {{\n", expr.to_hexpat()?);
                 for (expr, body) in cases.iter() {
-                    output.push_str(&self.with_indent(&format!("({}): ", expr.try_to_imhex()?)));
+                    output.push_str(&self.with_indent(&format!("({}): ", expr.to_hexpat()?)));
 
                     // if case_body.0.len() == 1 {
                     //     output.push_str(&case_body.0.get(0).unwrap().try_to_imhex()?);
@@ -456,7 +445,7 @@ impl ToImhex for Statement {
                     if body.0.last() == Some(&Statement::Break) {
                         body.0.remove(body.len() - 1);
                     }
-                    output.push_str(&self.with_indent_except_first(&body.try_to_imhex()?));
+                    output.push_str(&self.with_indent_except_first(&body.to_hexpat()?));
                     // }
                     output.push('\n');
                 }
@@ -466,7 +455,7 @@ impl ToImhex for Statement {
                     if body.0.last() == Some(&Statement::Break) {
                         body.0.remove(body.len() - 1);
                     }
-                    output.push_str(&self.with_indent_except_first(&body.try_to_imhex()?));
+                    output.push_str(&self.with_indent_except_first(&body.to_hexpat()?));
                     output.push('\n');
                 }
                 output.push('}');

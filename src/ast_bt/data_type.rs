@@ -2,7 +2,7 @@ use std::{fmt, str::FromStr};
 
 use crate::{
     ast_bt::stmt::{Enum, Expression, Struct},
-    traits::to_imhex::{ToImhex, ToImhexErr},
+    traits::to_imhex::{ToHexpatErr, ToHexpatStr},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -75,22 +75,22 @@ impl DataType {
         }
     }
 
-    pub fn try_to_imhex_fn_arg(&self) -> Result<String, ToImhexErr> {
+    pub fn try_to_imhex_fn_arg(&self) -> Result<String, ToHexpatErr> {
         match self {
             DataType::Array(_, _) => Ok("ref auto".to_string()),
-            _ => self.try_to_imhex(),
+            _ => self.to_hexpat(),
         }
     }
 
-    pub fn try_to_imhex_array(&self) -> Result<String, ToImhexErr> {
+    pub fn try_to_imhex_array(&self) -> Result<String, ToHexpatErr> {
         match self {
             DataType::Array(base_ty, e) => Ok(format!(
                 "std::Array<{}, {}>",
                 base_ty.try_to_imhex_array()?,
                 e.as_ref()
-                    .map_or_else(|| Ok(String::new()), |exp| exp.try_to_imhex())?
+                    .map_or_else(|| Ok(String::new()), |exp| exp.to_hexpat())?
             )),
-            _ => self.try_to_imhex(),
+            _ => self.to_hexpat(),
         }
     }
 }
@@ -172,8 +172,8 @@ impl FromStr for DataType {
     }
 }
 
-impl ToImhex for DataType {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+impl ToHexpatStr for DataType {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
         match self {
             Self::I8 => Ok("s8".to_owned()),
             Self::U8 => Ok("u8".to_owned()),
@@ -193,15 +193,15 @@ impl ToImhex for DataType {
             Self::Time64T => Ok("type::time_64_t".to_owned()),
             Self::Guid => Ok("type::GUID".to_owned()),
             Self::String => Ok("str".to_owned()),
-            Self::Struct(s) => s.try_to_imhex(),
-            Self::Enum(e) => e.try_to_imhex(),
-            Self::Array(base_ty, _) => base_ty.try_to_imhex(),
-            Self::Pointer(dt) => Ok(format!("{} &", dt.try_to_imhex()?)),
+            Self::Struct(s) => s.to_hexpat(),
+            Self::Enum(e) => e.to_hexpat(),
+            Self::Array(base_ty, _) => base_ty.to_hexpat(),
+            Self::Pointer(dt) => Ok(format!("{} &", dt.to_hexpat()?)),
             Self::Ident(name) => Ok(name.clone()),
             Self::Args(name, args) => {
                 let args_str = args
                     .iter()
-                    .map(|a| a.try_to_imhex())
+                    .map(|a| a.to_hexpat())
                     .collect::<Result<Vec<_>, _>>()?
                     .join(", ");
                 Ok(format!("{}<{}>", name, args_str))

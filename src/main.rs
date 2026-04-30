@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 mod ast_bt;
+mod ast_hexpat;
 mod lexer;
 mod macros;
 mod parser;

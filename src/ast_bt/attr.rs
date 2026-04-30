@@ -1,9 +1,9 @@
 use derive_more::Deref;
 
 use crate::{
-    ast_bt::stmt::Expression,
+    ast_bt::{literal::Literal, stmt::Expression},
     str_enum,
-    traits::to_imhex::{ToImhex, ToImhexErr},
+    traits::to_imhex::{ToHexpatErr, ToHexpatStr},
 };
 
 str_enum! {
@@ -60,36 +60,38 @@ str_enum! {
     }
 }
 
-impl ToImhex for Color {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
-        Ok(match self {
-            Self::Black => "000000",
-            Self::Red => "ff0000",
-            Self::DarkRed => "000080",
-            Self::LightRed => "ff8080",
-            Self::Green => "00ff00",
-            Self::DarkGreen => "008000",
-            Self::LightGreen => "80ff80",
-            Self::Blue => "0000ff",
-            Self::DarkBlue => "000080",
-            Self::LightBlue => "8080ff",
-            Self::Purple => "ff00ff",
-            Self::DarkPurple => "800080",
-            Self::LightPurple => "ff80ff",
-            Self::Aqua => "00ffff",
-            Self::DarkAqua => "008080",
-            Self::LightAqua => "80ffff",
-            Self::Yellow => "ffff00",
-            Self::DarkYellow => "808000",
-            Self::LightYellow => "ffff80",
-            Self::DarkGray => "404040",
-            Self::Gray => "808080",
-            Self::Silver => "0c0c0c",
-            Self::LightGray => "0e0e0e",
-            Self::White => "ffffff",
-            Self::None => "000000",
-        }
-        .to_owned())
+impl From<Color> for Literal {
+    fn from(value: Color) -> Self {
+        Literal::String(
+            match value {
+                Color::Black => "000000",
+                Color::Red => "ff0000",
+                Color::DarkRed => "000080",
+                Color::LightRed => "ff8080",
+                Color::Green => "00ff00",
+                Color::DarkGreen => "008000",
+                Color::LightGreen => "80ff80",
+                Color::Blue => "0000ff",
+                Color::DarkBlue => "000080",
+                Color::LightBlue => "8080ff",
+                Color::Purple => "ff00ff",
+                Color::DarkPurple => "800080",
+                Color::LightPurple => "ff80ff",
+                Color::Aqua => "00ffff",
+                Color::DarkAqua => "008080",
+                Color::LightAqua => "80ffff",
+                Color::Yellow => "ffff00",
+                Color::DarkYellow => "808000",
+                Color::LightYellow => "ffff80",
+                Color::DarkGray => "404040",
+                Color::Gray => "808080",
+                Color::Silver => "0c0c0c",
+                Color::LightGray => "0e0e0e",
+                Color::White => "ffffff",
+                Color::None => "000000",
+            }
+            .to_owned(),
+        )
     }
 }
 
@@ -110,8 +112,8 @@ pub enum ImhexAttribute {
 #[derive(Debug, Clone, PartialEq, Deref)]
 pub struct ImhexAttributes(pub Vec<ImhexAttribute>);
 
-impl ToImhex for ImhexAttributes {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
+impl ToHexpatStr for ImhexAttributes {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
         if self.is_empty() {
             Ok(String::new())
         } else {
@@ -119,9 +121,9 @@ impl ToImhex for ImhexAttributes {
             let mut iter = self.iter().peekable();
             while let Some(attr) = iter.next() {
                 let a = match attr {
-                    ImhexAttribute::Color(c) => format!("color(\"{}\")", c.try_to_imhex()?),
-                    ImhexAttribute::Comment(c) => format!("comment({})", c.try_to_imhex()?),
-                    ImhexAttribute::Name(n) => format!("name({})", n.try_to_imhex()?),
+                    ImhexAttribute::Color(c) => format!("color(\"{}\")", c.to_hexpat()?),
+                    ImhexAttribute::Comment(c) => format!("comment({})", c.to_hexpat()?),
+                    ImhexAttribute::Name(n) => format!("name({})", n.to_hexpat()?),
                     ImhexAttribute::Hidden => "hidden".to_owned(),
                 };
                 output.push_str(&a);
@@ -139,12 +141,12 @@ impl ToImhex for ImhexAttributes {
 pub struct Attributes(pub Vec<Attribute>);
 
 impl Attributes {
-    pub fn try_to_imhex_whitespace(&self) -> Result<String, ToImhexErr> {
+    pub fn try_to_imhex_whitespace(&self) -> Result<String, ToHexpatErr> {
         let attrs = self.to_imhex_attrs();
         if attrs.is_empty() {
             Ok(String::new())
         } else {
-            Ok(format!(" {}", attrs.try_to_imhex()?))
+            Ok(format!(" {}", attrs.to_hexpat()?))
         }
     }
 
@@ -163,8 +165,8 @@ impl Attributes {
     }
 }
 
-impl ToImhex for Attributes {
-    fn try_to_imhex(&self) -> Result<String, ToImhexErr> {
-        self.to_imhex_attrs().try_to_imhex()
+impl ToHexpatStr for Attributes {
+    fn to_hexpat(&self) -> Result<String, ToHexpatErr> {
+        self.to_imhex_attrs().to_hexpat()
     }
 }
