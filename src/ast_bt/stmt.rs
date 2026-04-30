@@ -99,6 +99,7 @@ impl ToImhex for Expression {
                 },
             )),
             Self::Call(name, args) => {
+                let mut name = name.clone();
                 let args_str = args
                     .iter()
                     .map(|a| a.try_to_imhex())
@@ -211,7 +212,7 @@ impl ToImhex for Struct {
 pub struct Enum {
     pub ident: Option<String>,
     pub ty: Option<DataType>,
-    pub variants: Vec<(String, Option<Box<Expression>>)>,
+    pub variants: Vec<(String, Option<Expression>)>,
     pub attrs: Attributes,
 }
 
@@ -277,11 +278,6 @@ pub enum Statement {
         body: Block,
     },
     Expr(Expression),
-    Assign {
-        left: Expression,
-        sign: String,
-        right: Expression,
-    },
     If {
         condition: Expression,
         then_block: Block,
@@ -313,8 +309,7 @@ impl Statement {
     pub fn is_with_semicolon(&self) -> bool {
         matches!(
             self,
-            Self::Assign { .. }
-                | Self::EnumDef(_)
+            Self::EnumDef(_)
                 | Self::Expr(_)
                 | Self::FnDef { .. }
                 | Self::Return(_)
@@ -327,8 +322,7 @@ impl Statement {
     pub fn is_oneline(&self) -> bool {
         matches!(
             self,
-            Self::Assign { .. }
-                | Self::Break
+            Self::Break
                 | Self::CPPDirective(_)
                 | Self::Continue
                 | Self::Expr(_)
@@ -399,12 +393,6 @@ impl ToImhex for Statement {
                 ident,
                 args.try_to_imhex()?,
                 block.try_to_imhex()?
-            )),
-            Statement::Assign { left, sign, right } => Ok(format!(
-                "{} {} {}",
-                left.try_to_imhex()?,
-                sign,
-                right.try_to_imhex()?
             )),
             Statement::Expr(expr) => expr.try_to_imhex(),
             Statement::If {

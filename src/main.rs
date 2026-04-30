@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 mod ast_bt;
+mod lexer;
 mod macros;
 mod parser;
 mod traits;
@@ -9,6 +10,8 @@ mod translator;
 
 use parser::Parser;
 use translator::Translator;
+
+use crate::lexer::tokenize;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
@@ -27,7 +30,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let content = fs::read_to_string(input_file)?;
 
     // Parse the template
-    let mut parser = Parser::new(&content);
+    let tokens = tokenize(content);
+    let mut parser = Parser::new(tokens);
     let template = parser.parse()?;
 
     // Convert to ImHex format

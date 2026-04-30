@@ -1,11 +1,21 @@
-use crate::ast_bt::{
-    attr::{Attribute, AttributeType, Attributes},
-    data_type::*,
-    stmt::*,
-    template::*,
-    token::*,
-};
+use thiserror::Error;
+
+use crate::ast_bt::{attr::*, data_type::*, stmt::*, template::*, token::*};
 use std::collections::VecDeque;
+
+#[derive(Debug, Error)]
+pub enum ParseErrorType {
+    #[error("reached end of token stream")]
+    Eof,
+    #[error("expected {0} ({0:?}), found {1}")]
+    Expect(TokenKind, TokenKind),
+    #[error("expected any of {0:?}, found {1}")]
+    ExpectAny(Vec<TokenKind>, TokenKind),
+    #[error("{0}")]
+    Other(String),
+}
+
+type ParseResult<T> = Result<T, ParseErrorType>;
 
 pub struct Parser {
     tokens: VecDeque<(TokenKind, String)>,
@@ -13,15 +23,14 @@ pub struct Parser {
 }
 
 impl Parser {
-    pub fn new(content: &str) -> Self {
-        let tokens = Self::tokenize(content);
+    pub fn new(tokens: VecDeque<(TokenKind, String)>) -> Self {
         Parser { tokens, pos: 0 }
     }
 
     fn get_context(&self) -> String {
         let mut context = "Context: ".to_string();
-        for i in 0..=4 {
-            if let Some(t) = self.tokens.get(self.pos + i - 2).map(|(_, s)| s) {
+        for i in 0..=3 {
+            if let Some(t) = self.tokens.get(self.pos + i).map(|(_, s)| s) {
                 context.push_str(t);
                 context.push(' ');
             }
@@ -29,129 +38,7 @@ impl Parser {
         context
     }
 
-    fn tokenize(content: &str) -> VecDeque<(TokenKind, String)> {
-        let mut tokens = VecDeque::new();
-        let mut current = String::new();
-        let mut chars = content.chars().peekable();
-
-        while let Some(ch) = chars.next() {
-            match ch {
-                '/' if chars.peek() == Some(&'/') => {
-                    if !current.is_empty() {
-                        tokens.push_back((current.parse().unwrap(), current));
-                    }
-                    current = ch.to_string();
-                    for c in chars.by_ref() {
-                        current.push(c);
-                        if c == '\n' {
-                            break;
-                        }
-                    }
-                    // tokens.push_back((
-                    //     TokenKind::Comment(current.clone()),
-                    //     current.drain(..).collect(),
-                    // ));
-                    current.clear();
-                }
-                '/' if chars.peek() == Some(&'*') => {
-                    if !current.is_empty() {
-                        tokens.push_back((current.parse().unwrap(), current));
-                    }
-                    current = ch.to_string();
-                    while let Some(c) = chars.next() {
-                        current.push(c);
-                        if c == '*' && chars.peek() == Some(&'/') {
-                            current.push(chars.next().unwrap());
-                            break;
-                        }
-                    }
-                    // tokens.push_back((
-                    //     TokenKind::Comment(current.clone()),
-                    //     current.drain(..).collect(),
-                    // ));
-                    current.clear();
-                }
-                '#' => {
-                    if !current.is_empty() {
-                        tokens.push_back((current.parse().unwrap(), current));
-                    }
-                    current = ch.to_string();
-                    for c in chars.by_ref() {
-                        if c == '\n' {
-                            break;
-                        }
-                        current.push(c);
-                    }
-                    tokens.push_back((
-                        TokenKind::CPPDirective(current.clone()),
-                        std::mem::take(&mut current),
-                    ));
-                }
-                '"' => {
-                    if !current.is_empty() {
-                        tokens.push_back((current.parse().unwrap(), current));
-                    }
-                    current = ch.to_string();
-                    while let Some(c) = chars.next() {
-                        current.push(c);
-                        if c == '"' && current.len() == 2 {
-                            tokens.push_back((
-                                current.parse().unwrap(),
-                                std::mem::take(&mut current),
-                            ));
-                            break;
-                        }
-                        if c != '\\' && chars.peek() == Some(&'"') {
-                            current.push(chars.next().unwrap());
-                            tokens.push_back((
-                                current.parse().unwrap(),
-                                std::mem::take(&mut current),
-                            ));
-                            break;
-                        }
-                    }
-                }
-                '\'' => {
-                    if !current.is_empty() {
-                        tokens.push_back((current.parse().unwrap(), current));
-                    }
-                    current = ch.to_string();
-                    while let Some(c) = chars.next() {
-                        current.push(c);
-                        if c != '\\' && chars.peek() == Some(&'\'') {
-                            tokens.push_back((
-                                current.parse().unwrap(),
-                                std::mem::take(&mut current),
-                            ));
-                            current.push(chars.next().unwrap());
-                            break;
-                        }
-                    }
-                }
-                _ if ch.is_whitespace() => {
-                    if !current.is_empty() {
-                        tokens.push_back((current.parse().unwrap(), std::mem::take(&mut current)));
-                    }
-                }
-                _ if !current.is_empty()
-                    && let TokenKind::Unknown(_) =
-                        format!("{}{}", current, ch).parse().unwrap() =>
-                {
-                    tokens.push_back((current.parse().unwrap(), std::mem::take(&mut current)));
-                    current = ch.to_string();
-                }
-                _ => current.push(ch),
-            }
-        }
-
-        if !current.is_empty() {
-            tokens.push_back((current.parse().unwrap(), current));
-        }
-
-        tokens
-    }
-
-    pub fn parse(&mut self) -> Result<Template, String> {
+    pub fn parse(&mut self) -> ParseResult<Template> {
         let mut statements = Vec::new();
 
         while !self.is_eof() {
@@ -164,7 +51,7 @@ impl Parser {
         })
     }
 
-    fn parse_def_or_stmt(&mut self) -> Result<Vec<Statement>, String> {
+    fn parse_def_or_stmt(&mut self) -> ParseResult<Vec<Statement>> {
         match self.peek_token()? {
             TokenKind::Keyword(Keyword::Struct | Keyword::Union) => {
                 if let Ok(d) = self.try_parse_var_def(false) {
@@ -192,69 +79,54 @@ impl Parser {
             }
             TokenKind::CPPDirective(s) => {
                 let s = s.clone();
-                self.advance();
+                self.advance()?;
                 Ok(vec![Statement::CPPDirective(s)])
             }
             _ => self.parse_stmt().map(|e| vec![e]),
         }
     }
 
-    fn parse_expr_stmt(&mut self) -> Result<Statement, String> {
+    fn parse_expr_stmt(&mut self) -> ParseResult<Statement> {
         let expr = self.parse_expr()?;
 
-        let s = self.peek_token()?;
-        if s.is_assign_op() {
-            let sign = s.to_string();
-            self.advance();
-            let rhs = self.parse_expr()?;
-            self.expect(Punctuator::Semicolon)?;
-            return Ok(Statement::Assign {
-                left: expr,
-                sign,
-                right: rhs,
-            });
-        }
+        // let s = self.peek_token()?;
+        // if s.is_assign_op() {
+        //     let sign = s.to_string();
+        //     self.advance();
+        //     let rhs = self.parse_expr()?;
+        //     self.expect(Punctuator::Semicolon)?;
+        //     return Ok(Statement::Assign {
+        //         left: expr,
+        //         sign,
+        //         right: rhs,
+        //     });
+        // }
 
         self.expect(Punctuator::Semicolon)?;
         Ok(Statement::Expr(expr))
     }
 
-    fn parse_typedef(&mut self) -> Result<Statement, String> {
+    fn parse_typedef(&mut self) -> ParseResult<Statement> {
         self.expect(Keyword::Typedef)?;
 
-        let base_ty = self
-            .parse_type()
-            .map_err(|e| format!("{}. Context: parsing typedef{}", e, self.get_context()))?;
+        let base_ty = self.parse_type()?;
 
         eprintln!("[DEBUG] Parsing typedef type alias");
 
-        let name = self.peek_token()?.to_string();
-        eprintln!("[DEBUG] Typedef name: {}", name);
-        self.advance();
+        let ident = self.parse_ident()?;
+        eprintln!("[DEBUG] Typedef name: {}", ident);
 
         let mut ty = base_ty;
         while self.peek_token()? == &Punctuator::LBracket {
-            self.advance();
+            self.advance()?;
 
             let size = if self.peek_token()? != &Punctuator::RBracket {
-                Some(Box::new(self.parse_expr().map_err(|e| {
-                    format!(
-                        "{}. Context: parsing typedef array dimension{}",
-                        e,
-                        self.get_context()
-                    )
-                })?))
+                Some(Box::new(self.parse_expr()?))
             } else {
                 None
             };
 
-            self.expect(Punctuator::RBracket).map_err(|e| {
-                format!(
-                    "{}. Context: in typedef array definition{}",
-                    e,
-                    self.get_context()
-                )
-            })?;
+            self.expect(Punctuator::RBracket)?;
 
             ty = DataType::Array(Box::new(ty), size);
         }
@@ -265,36 +137,27 @@ impl Parser {
             Attributes(vec![])
         };
 
-        self.expect(Punctuator::Semicolon)
-                .map_err(|e| format!("{}. Context: at end of typedef statement. Current token: '{}' at position {}. Expected ';'", e, self.peek_token().unwrap(), self.pos))?;
+        self.expect(Punctuator::Semicolon)?;
 
-        Ok(Statement::TypeDef {
-            ident: name,
-            ty,
-            attrs,
-        })
+        Ok(Statement::TypeDef { ident, ty, attrs })
     }
 
-    fn parse_struct(&mut self) -> Result<Struct, String> {
+    fn parse_struct(&mut self) -> ParseResult<Struct> {
         let keyword = self.expect_any(vec![Keyword::Struct, Keyword::Union])?;
         let ty = match keyword {
-            TokenKind::Keyword(Keyword::Struct) => StructType::Struct,
-            TokenKind::Keyword(Keyword::Union) => StructType::Union,
+            Keyword::Struct => StructType::Struct,
+            Keyword::Union => StructType::Union,
             _ => panic!(),
         };
 
         let ident = if let TokenKind::Ident(i) = self.peek_token()? {
-            Some(i.to_owned())
+            Some(self.parse_ident()?)
         } else {
             None
         };
-        if ident.is_some() {
-            self.advance();
-        }
         eprintln!("[DEBUG] Parsing struct: {:?}", ident);
 
         let args = if self.peek_token()? == &Punctuator::LParen {
-            self.advance();
             let args = self.parse_args()?;
             self.expect(Punctuator::RParen)?;
             args
@@ -303,7 +166,7 @@ impl Parser {
         };
 
         if self.peek_token()? == &Punctuator::Semicolon {
-            self.advance();
+            self.advance()?;
             return Ok(Struct {
                 ty,
                 ident,
@@ -332,21 +195,18 @@ impl Parser {
         })
     }
 
-    fn parse_attrs(&mut self) -> Result<Attributes, String> {
+    fn parse_attrs(&mut self) -> ParseResult<Attributes> {
         self.expect(Punctuator::LAngledBracket)?;
         let mut attrs = vec![];
         while self.peek_token()? != &Punctuator::RAngledBracket {
-            let ty = match self.peek_token()?.as_attribute() {
-                Some(attr) => attr.clone(),
-                _ => return Err(format!("unknown attribute name {}", self.peek_token()?)),
-            };
-            self.advance();
+            let ty = self
+                .read_token()?
+                .as_attribute()
+                .map_err(|e| ParseErrorType::Other(e))?;
             self.expect(Punctuator::Assign)?;
             let value = self.parse_primary_expr()?;
             attrs.push(Attribute { ty, value });
-            if self.peek_token()? == &Punctuator::Comma {
-                self.advance();
-            }
+            self.optional(Punctuator::Comma)?;
         }
         self.expect(Punctuator::RAngledBracket)?;
         Ok(Attributes(attrs))
@@ -359,23 +219,22 @@ impl Parser {
             .map(|a| a.value.clone())
     }
 
-    fn parse_enum(&mut self) -> Result<Enum, String> {
+    fn parse_enum(&mut self) -> ParseResult<Enum> {
         self.expect(Keyword::Enum)?;
 
-        let ty = if self.peek_token()? == &Punctuator::LAngledBracket {
-            self.advance();
+        let mut token = self.read_token()?;
+        let ty = if token == Punctuator::LAngledBracket {
+            token = self.read_token()?;
             Some(self.parse_type()?)
         } else {
             None
         };
 
-        let ident = self.peek_token()?.ident().map(|s| s.to_owned());
+        let ident = token.ident().ok().map(|s| s.to_owned());
         eprintln!("[DEBUG] Parsing enum: {:?}", ident);
-        self.advance();
 
-        if self.peek_token()? == &Punctuator::Colon {
-            self.advance();
-
+        token = self.read_token()?;
+        if token == Punctuator::Colon {
             self.parse_type()?;
         }
 
@@ -384,26 +243,19 @@ impl Parser {
         let mut variants = Vec::new();
 
         while self.peek_token()? != &Punctuator::RBrace {
-            let variant_name = self
-                .peek_token()?
-                .ident()
-                .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
-                .to_string();
+            let variant_name = self.parse_ident()?;
             eprintln!("[DEBUG] Enum variant: {}", variant_name);
-            self.advance();
 
             let value = if self.peek_token()? == &Punctuator::Assign {
-                self.advance();
-                Some(Box::new(self.parse_literal()?))
+                self.advance()?;
+                Some(self.parse_literal()?)
             } else {
                 None
             };
 
             variants.push((variant_name, value));
 
-            if self.peek_token()? == &Punctuator::Comma {
-                self.advance();
-            }
+            self.optional(Punctuator::Comma)?;
         }
 
         self.expect(Punctuator::RBrace)?;
@@ -424,17 +276,15 @@ impl Parser {
         })
     }
 
-    fn parse_ident(&mut self) -> Result<String, String> {
-        let ident = self
-            .peek_token()?
+    fn parse_ident(&mut self) -> ParseResult<String> {
+        Ok(self
+            .read_token()?
             .ident()
-            .ok_or_else(|| format!("wanted ident, got {}", self.peek_token().unwrap()))?
-            .to_string();
-        self.advance();
-        Ok(ident)
+            .map_err(|s| ParseErrorType::Other(s))?
+            .to_owned())
     }
 
-    fn parse_var_or_fn_def(&mut self) -> Result<Vec<Statement>, String> {
+    fn parse_var_or_fn_def(&mut self) -> ParseResult<Vec<Statement>> {
         let pos = self.pos;
         match self.parse_var_def(false) {
             Ok(d) => Ok(d),
@@ -446,33 +296,19 @@ impl Parser {
         }
     }
 
-    fn parse_args(&mut self) -> Result<Args, String> {
+    fn parse_args(&mut self) -> ParseResult<Args> {
         let mut args = vec![];
         while self.peek_token()? != &Punctuator::RParen {
-            let data_type = self.parse_type().map_err(|e| {
-                format!(
-                    "{}. Context: parsing variable type{}",
-                    e,
-                    self.get_context()
-                )
-            })?;
+            let data_type = self.parse_type()?;
             let ident = self.parse_ident()?;
             args.push((data_type, ident));
-            if self.peek_token()? == &Punctuator::Comma {
-                self.advance();
-            }
+            self.optional(Punctuator::Comma)?;
         }
         Ok(Args(args))
     }
 
-    fn parse_fn_def(&mut self) -> Result<Statement, String> {
-        let ty = self.parse_type().map_err(|e| {
-            format!(
-                "{}. Context: parsing variable type{}",
-                e,
-                self.get_context()
-            )
-        })?;
+    fn parse_fn_def(&mut self) -> ParseResult<Statement> {
+        let ty = self.parse_type()?;
 
         let ident = self.parse_ident()?;
         self.expect(Punctuator::LParen)?;
@@ -488,26 +324,20 @@ impl Parser {
         })
     }
 
-    fn parse_var_def(&mut self, local: bool) -> Result<Vec<Statement>, String> {
+    fn parse_var_def(&mut self, local: bool) -> ParseResult<Vec<Statement>> {
         let mut stmts: Vec<Statement> = vec![];
         if local {
             self.expect(Keyword::Local)?;
         }
 
-        let base_ty = self.parse_type().map_err(|e| {
-            format!(
-                "{}. Context: parsing variable type{}",
-                e,
-                self.get_context()
-            )
-        })?;
+        let base_ty = self.parse_type()?;
 
         loop {
             let ident = self.parse_ident()?;
 
             let mut ty = base_ty.clone();
             if self.peek_token()? == &Punctuator::LParen {
-                self.advance();
+                self.advance()?;
 
                 let mut args = vec![];
                 while self.peek_token()? != &Punctuator::RParen {
@@ -521,17 +351,10 @@ impl Parser {
                 ty = DataType::Args(Box::new(ty), args);
             }
             if self.peek_token()? == &Punctuator::LBracket {
-                self.advance();
+                self.advance()?;
 
                 let size = if self.peek_token()? != &Punctuator::RBracket {
-                    Some(Box::new(self.parse_expr().map_err(|e| {
-                        format!(
-                            "{}. Context: parsing array size for variable '{}'{}",
-                            e,
-                            ident,
-                            self.get_context()
-                        )
-                    })?))
+                    Some(Box::new(self.parse_expr()?))
                 } else {
                     None
                 };
@@ -542,25 +365,18 @@ impl Parser {
             }
 
             let value = if self.peek_token()? == &Punctuator::Assign {
-                self.advance();
+                self.advance()?;
 
-                Some(self.parse_expr().map_err(|e| {
-                    format!(
-                        "{}. Context: parsing initialization value for variable '{}'{}",
-                        e,
-                        ident,
-                        self.get_context()
-                    )
-                })?)
+                Some(self.parse_expr()?)
             } else {
                 None
             };
 
             let bits = if self.peek_token()? == &Punctuator::Colon {
-                self.advance();
+                self.advance()?;
 
                 match self.parse_literal()? {
-                    Expression::Literal(l) => l.int().cloned(),
+                    Expression::Literal(l) => l.int(),
                     _ => None,
                 }
             } else {
@@ -596,7 +412,7 @@ impl Parser {
         Ok(stmts)
     }
 
-    fn try_parse_var_def(&mut self, local: bool) -> Result<Vec<Statement>, String> {
+    fn try_parse_var_def(&mut self, local: bool) -> ParseResult<Vec<Statement>> {
         let pos = self.pos;
         match self.parse_var_def(local) {
             Ok(d) => Ok(d),
@@ -607,20 +423,18 @@ impl Parser {
         }
     }
 
-    fn parse_if(&mut self) -> Result<Statement, String> {
+    fn parse_if(&mut self) -> ParseResult<Statement> {
         self.expect(Keyword::If)?;
         self.expect(Punctuator::LParen)?;
 
         eprintln!("[DEBUG] Parsing if condition");
-        let condition = self
-            .parse_expr()
-            .map_err(|e| format!("{}. Context: parsing if condition{}", e, self.get_context()))?;
+        let condition = self.parse_expr()?;
 
         self.expect(Punctuator::RParen)?;
 
         let then_block = self.parse_any_block()?;
         let else_block = if self.peek_token()? == &Keyword::Else {
-            self.advance();
+            self.advance()?;
             Some(self.parse_any_block()?)
         } else {
             None
@@ -633,19 +447,13 @@ impl Parser {
         })
     }
 
-    fn parse_while(&mut self) -> Result<Statement, String> {
+    fn parse_while(&mut self) -> ParseResult<Statement> {
         self.expect(Keyword::While)?;
 
         self.expect(Punctuator::LParen)?;
 
         eprintln!("[DEBUG] Parsing while condition");
-        let condition = self.parse_expr().map_err(|e| {
-            format!(
-                "{}. Context: parsing while condition{}",
-                e,
-                self.get_context()
-            )
-        })?;
+        let condition = self.parse_expr()?;
 
         self.expect(Punctuator::RParen)?;
 
@@ -654,7 +462,7 @@ impl Parser {
         Ok(Statement::While { condition, body })
     }
 
-    fn parse_for(&mut self) -> Result<Statement, String> {
+    fn parse_for(&mut self) -> ParseResult<Statement> {
         self.expect(Keyword::For)?;
 
         self.expect(Punctuator::LParen)?;
@@ -679,7 +487,7 @@ impl Parser {
         })
     }
 
-    fn parse_any_block(&mut self) -> Result<Block, String> {
+    fn parse_any_block(&mut self) -> ParseResult<Block> {
         if self.peek_token()? == &Punctuator::LBrace {
             self.parse_braced_block()
         } else {
@@ -687,7 +495,7 @@ impl Parser {
         }
     }
 
-    fn parse_braced_block(&mut self) -> Result<Block, String> {
+    fn parse_braced_block(&mut self) -> ParseResult<Block> {
         let mut stmts = vec![];
         self.expect(Punctuator::LBrace)?;
         while self.peek_token()? != &Punctuator::RBrace {
@@ -697,11 +505,11 @@ impl Parser {
         Ok(Block(stmts))
     }
 
-    fn parse_inline_block(&mut self) -> Result<Block, String> {
+    fn parse_inline_block(&mut self) -> ParseResult<Block> {
         Ok(Block(self.parse_def_or_stmt()?))
     }
 
-    fn parse_switch(&mut self) -> Result<Statement, String> {
+    fn parse_switch(&mut self) -> ParseResult<Statement> {
         self.expect(Keyword::Switch)?;
 
         self.expect(Punctuator::LParen)?;
@@ -717,12 +525,10 @@ impl Parser {
         let mut default = None;
 
         while self.peek_token()? != &Punctuator::RBrace {
-            // not really sure what to do in this case except clone (either way it's cheap)
-            let token = self.peek_token()?;
+            let token = self.read_token()?;
 
             match token {
                 TokenKind::Keyword(Keyword::Case) => {
-                    self.advance();
                     let expr = self.parse_expr()?;
                     self.expect(Punctuator::Colon)?;
                     let mut stmts = vec![];
@@ -734,7 +540,6 @@ impl Parser {
                     cases.push((expr, Block(stmts)));
                 }
                 TokenKind::Keyword(Keyword::Default) => {
-                    self.advance();
                     self.expect(Punctuator::Colon)?;
                     let mut stmts = vec![];
                     while self.peek_token()? != &Punctuator::RBrace {
@@ -743,10 +548,10 @@ impl Parser {
                     default.replace(Block(stmts));
                 }
                 _ => {
-                    return Err(format!(
+                    return Err(ParseErrorType::Other(format!(
                         "invalid token encountered in switch statement, expected case or default, got {}",
                         token
-                    ));
+                    )));
                 }
             }
         }
@@ -761,25 +566,21 @@ impl Parser {
         })
     }
 
-    fn parse_return(&mut self) -> Result<Statement, String> {
+    fn parse_return(&mut self) -> ParseResult<Statement> {
         eprintln!("[DEBUG] Parsing return statement");
-        self.advance();
+        self.expect(Keyword::Return)?;
 
         let value = if self.peek_token()? != &Punctuator::Semicolon {
-            Some(self.parse_expr().map_err(|e| {
-                format!("{}. Context: parsing return value{}", e, self.get_context())
-            })?)
+            Some(self.parse_expr()?)
         } else {
             None
         };
 
-        if self.peek_token()? == &Punctuator::Semicolon {
-            self.advance();
-        }
+        self.expect(Punctuator::Semicolon)?;
         Ok(Statement::Return(value))
     }
 
-    fn parse_stmt(&mut self) -> Result<Statement, String> {
+    fn parse_stmt(&mut self) -> ParseResult<Statement> {
         let token = self.peek_token()?;
         eprintln!("[DEBUG] parse_statement: token = '{}'", token);
 
@@ -807,7 +608,7 @@ impl Parser {
         }
     }
 
-    fn parse_type(&mut self) -> Result<DataType, String> {
+    fn parse_type(&mut self) -> ParseResult<DataType> {
         match self.peek_token()? {
             TokenKind::Keyword(Keyword::Struct) => {
                 let s = self.parse_struct()?;
@@ -821,48 +622,45 @@ impl Parser {
         }
     }
 
-    fn parse_basic_type(&mut self) -> Result<DataType, String> {
-        let token = self.peek_token()?.clone();
+    fn parse_basic_type(&mut self) -> ParseResult<DataType> {
+        let token = self.read_token()?;
 
         let base_type = match token {
             TokenKind::Keyword(Keyword::Unsigned | Keyword::Signed) => {
-                self.advance();
-
-                let next_token = self.peek_token()?;
+                let next_token = self.read_token()?;
                 match next_token {
                     TokenKind::Keyword(Keyword::DataType(dt)) => {
-                        let d = dt.clone();
                         if token == Keyword::Unsigned {
-                            d.to_unsigned()
+                            dt.to_unsigned()
                         } else {
-                            d.to_signed()
+                            dt.to_signed()
                         }
                     }
                     _ => {
-                        return Err("no type after 'unsigned' found".to_string());
+                        return Err(ParseErrorType::Other(
+                            "no type after 'unsigned' found".to_owned(),
+                        ));
                     }
                 }
             }
             TokenKind::Keyword(Keyword::DataType(dt)) => dt,
             TokenKind::Ident(i) => DataType::Ident(i),
-            t => return Err(format!("Nonsense datatype {}", t)),
+            t => return Err(ParseErrorType::Other(format!("Nonsense datatype {}", t))),
         };
 
-        self.advance();
-
         if self.peek_token()? == &Punctuator::Ampersand {
-            self.advance();
+            self.advance()?;
             Ok(DataType::Pointer(Box::new(base_type)))
         } else {
             Ok(base_type)
         }
     }
 
-    fn parse_expr(&mut self) -> Result<Expression, String> {
+    fn parse_expr(&mut self) -> ParseResult<Expression> {
         self.parse_binary_expr(0)
     }
 
-    fn parse_binary_expr(&mut self, min_prec: i32) -> Result<Expression, String> {
+    fn parse_binary_expr(&mut self, min_prec: i32) -> ParseResult<Expression> {
         let mut left = self.parse_primary_expr()?;
 
         while let TokenKind::Punc(p) = self.peek_token()?
@@ -872,30 +670,19 @@ impl Parser {
             if prec < min_prec {
                 break;
             }
+            self.advance()?;
 
-            self.advance();
-
-            let right = self.parse_binary_expr(prec + 1).map_err(|e| {
-                format!(
-                    "{}. Context: parsing binary expression with operator '{}'{}",
-                    e,
-                    p,
-                    self.get_context()
-                )
-            })?;
+            let right = self.parse_binary_expr(prec + 1)?;
             left = Expression::BinaryOp(Box::new(left), p, Box::new(right));
         }
 
         Ok(left)
     }
 
-    fn parse_primary_expr(&mut self) -> Result<Expression, String> {
-        let token = self.peek_token()?;
-
+    fn parse_primary_expr(&mut self) -> ParseResult<Expression> {
+        let token = self.read_token()?;
         match token {
             TokenKind::Punc(Punctuator::LParen) => {
-                self.advance();
-
                 let saved_pos = self.pos;
                 let is_cast = self.is_cast();
 
@@ -918,11 +705,7 @@ impl Parser {
                     Ok(expr)
                 }
             }
-            TokenKind::Literal(l) => {
-                let lit = l.clone();
-                self.advance();
-                Ok(Expression::Literal(lit))
-            }
+            TokenKind::Literal(l) => Ok(Expression::Literal(l)),
             TokenKind::Punc(
                 p @ (Punctuator::Plus
                 | Punctuator::Minus
@@ -931,8 +714,6 @@ impl Parser {
                 | Punctuator::Inc
                 | Punctuator::Dec),
             ) => {
-                let p = p.clone();
-                self.advance();
                 let expr = self.parse_primary_expr()?;
                 Ok(Expression::UnaryOp(
                     p,
@@ -942,47 +723,36 @@ impl Parser {
             }
             TokenKind::Keyword(s @ Keyword::Sizeof) => {
                 let s = s.to_string();
-                self.advance();
-                self.advance();
-
-                let mut args = Vec::new();
-                while self.peek_token()? != &Punctuator::RParen {
-                    args.push(self.parse_expr()?);
-
-                    if self.peek_token()? == &Punctuator::Comma {
-                        self.advance();
-                    }
-                }
+                self.expect(Punctuator::LParen)?;
+                let arg = self.parse_expr()?;
                 self.expect(Punctuator::RParen)?;
-                Ok(Expression::Call(Box::new(Expression::Identifier(s)), args))
+                Ok(Expression::Call(
+                    Box::new(Expression::Identifier(s)),
+                    vec![arg],
+                ))
             }
             TokenKind::Keyword(Keyword::Color(c)) => {
                 let s = c.to_string();
-                self.advance();
                 Ok(Expression::Identifier(s))
             }
             TokenKind::Ident(s) => {
-                let mut left = Expression::Identifier(s.to_owned());
-                self.advance();
+                let mut left = Expression::Identifier(s);
 
                 loop {
                     match self.peek_token()? {
                         TokenKind::Punc(Punctuator::LParen) => {
-                            self.advance();
+                            self.advance()?;
 
                             let mut args = Vec::new();
-                            while self.peek_token()? != &Punctuator::RParen && !self.is_eof() {
+                            while self.peek_token()? != &Punctuator::RParen {
                                 args.push(self.parse_expr()?);
-
-                                if self.peek_token()? == &Punctuator::Comma {
-                                    self.advance();
-                                }
+                                self.optional(Punctuator::Comma)?;
                             }
                             self.expect(Punctuator::RParen)?;
                             left = Expression::Call(Box::new(left), args);
                         }
                         TokenKind::Punc(Punctuator::LBracket) => {
-                            self.advance();
+                            self.advance()?;
 
                             let index = self.parse_expr()?;
 
@@ -990,35 +760,36 @@ impl Parser {
                             left = Expression::ArrayAccess(Box::new(left), Box::new(index));
                         }
                         TokenKind::Punc(Punctuator::Dot) => {
-                            self.advance();
+                            self.advance()?;
 
                             let field = self.parse_ident()?;
                             left = Expression::FieldAccess(Box::new(left), field);
                         }
                         TokenKind::Punc(p @ (Punctuator::Inc | Punctuator::Dec)) => {
                             let p = p.clone();
-                            self.advance();
+                            self.advance()?;
 
                             left = Expression::UnaryOp(p, Box::new(left), UnaryPosition::Postfix);
                         }
                         _ => break,
-                    };
+                    }
                 }
                 Ok(left)
             }
-            _ => Err(format!("invalid starting token {} for expression", token)),
+            _ => Err(ParseErrorType::Other(format!(
+                "invalid starting token {} for expression",
+                token
+            ))),
         }
     }
 
     fn is_cast(&mut self) -> bool {
-        // Try to determine if this is a cast by looking for type keywords
         let token = if let Ok(t) = self.peek_token() {
             t
         } else {
             return false;
         };
 
-        // Check if it's a known type
         if !matches!(
             token,
             TokenKind::Keyword(Keyword::DataType(_)) | TokenKind::Ident(_)
@@ -1044,7 +815,7 @@ impl Parser {
         is_cast
     }
 
-    fn parse_literal(&mut self) -> Result<Expression, String> {
+    fn parse_literal(&mut self) -> ParseResult<Expression> {
         let op = match self.peek_token()? {
             TokenKind::Punc(
                 p @ (Punctuator::Plus
@@ -1054,13 +825,12 @@ impl Parser {
                 | Punctuator::Dec),
             ) => {
                 let p = p.clone();
-                self.advance();
+                self.advance()?;
                 Some(p)
             }
             _ => None,
         };
-        let literal = self.peek_token()?.clone();
-        self.advance();
+        let literal = self.read_token()?.clone();
         match literal {
             TokenKind::Literal(l) => match op {
                 Some(p) => Ok(Expression::UnaryOp(
@@ -1070,7 +840,7 @@ impl Parser {
                 )),
                 None => Ok(Expression::Literal(l)),
             },
-            _ => Err("wrong token kind".to_owned()),
+            _ => Err(ParseErrorType::Other("wrong token kind".to_owned())),
         }
     }
 
@@ -1089,91 +859,96 @@ impl Parser {
             Punctuator::BitLeftShift | Punctuator::BitRightShift => Some(8),
             Punctuator::Plus | Punctuator::Minus => Some(9),
             Punctuator::Asterisk | Punctuator::Div | Punctuator::Mod => Some(10),
-            Punctuator::Assign | Punctuator::PlusAssign | Punctuator::MinusAssign => Some(0),
+            Punctuator::Assign
+            | Punctuator::DivAssign
+            | Punctuator::MinusAssign
+            | Punctuator::ModAssign
+            | Punctuator::MultAssign
+            | Punctuator::PlusAssign
+            | Punctuator::BitAndAssign
+            | Punctuator::BitOrAssign
+            | Punctuator::BitRightShiftAssign
+            | Punctuator::BitLeftShiftAssign
+            | Punctuator::BitXorAssign => Some(0),
             _ => None,
         }
     }
 
-    fn peek_token(&self) -> Result<&TokenKind, String> {
+    fn peek_token(&self) -> ParseResult<&TokenKind> {
         self.peek_token_after(0)
     }
 
-    fn peek_token_after(&self, after: usize) -> Result<&TokenKind, String> {
+    fn peek_token_after(&self, after: usize) -> ParseResult<&TokenKind> {
         let (t, _) = self
             .tokens
             .get(self.pos + after)
-            .ok_or_else(|| format!("EoF at position {}", self.pos))?;
-        // eprintln!("[DEBUG] peeking token: {:?}", s);
+            .ok_or(ParseErrorType::Eof)?;
         Ok(t)
     }
 
-    fn advance(&mut self) {
-        if !self.is_eof() {
-            self.pos += 1;
-        }
+    fn read_token(&mut self) -> ParseResult<TokenKind> {
+        let t = self
+            .tokens
+            .get(self.pos)
+            .cloned()
+            .ok_or(ParseErrorType::Eof)
+            .map(|(t, _)| t);
+        self.pos += 1;
+        t
     }
 
-    fn expect<T>(&mut self, expected: T) -> Result<(), String>
+    fn advance(&mut self) -> ParseResult<()> {
+        if self.is_eof() {
+            return Err(ParseErrorType::Eof);
+        }
+        self.pos += 1;
+        Ok(())
+    }
+
+    fn expect<T>(&mut self, expected: T) -> ParseResult<()>
     where
         T: Into<TokenKind>,
     {
         let token: TokenKind = expected.into();
-        if self.is_eof() {
-            return Err(format!(
-                "Expected '{}' but reached end of file {}",
-                token,
-                self.get_context()
-            ));
-        }
+        let next = self.read_token()?;
 
-        if self.peek_token()? == &token {
-            self.advance();
+        if next == token {
             Ok(())
         } else {
-            Err(format!(
-                "Expected '{}' but found {:?} '{}' at token position {} {}",
-                token,
-                self.peek_token()?,
-                self.peek_token()?,
-                self.pos,
-                self.get_context()
-            ))
+            Err(ParseErrorType::Expect(token, next))
         }
     }
 
-    fn optional<T>(&mut self, expected: T) -> Result<(), String>
+    fn optional<T>(&mut self, expected: T) -> ParseResult<()>
     where
         T: Into<TokenKind>,
     {
         let token: TokenKind = expected.into();
 
         if self.peek_token()? == &token {
-            self.advance();
+            self.read_token()?;
         }
         Ok(())
     }
 
-    fn expect_any<T>(&mut self, expected: T) -> Result<TokenKind, String>
+    fn expect_any<T>(&mut self, expected: T) -> ParseResult<T::Item>
     where
-        T: IntoIterator,
-        T::Item: Into<TokenKind>,
+        T: IntoIterator + std::fmt::Debug + Clone,
+        T::Item: Into<TokenKind> + Clone,
     {
+        let err = ParseErrorType::ExpectAny(
+            expected.clone().into_iter().map(|t| t.into()).collect(),
+            self.peek_token()?.clone(),
+        );
         let token = self.peek_token()?;
         for e in expected {
-            let t = e.into();
+            let t = e.clone().into();
             if &t == token {
-                self.advance();
-                return Ok(t);
+                self.advance()?;
+                return Ok(e);
             }
         }
-        Err(format!(
-            "Expected '{}' but found {:?} '{}' at token position {} {}",
-            token,
-            self.peek_token()?,
-            self.peek_token()?,
-            self.pos,
-            self.get_context()
-        ))
+        Err(err)
     }
 
     fn is_eof(&self) -> bool {

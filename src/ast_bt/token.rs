@@ -117,32 +117,17 @@ pub enum TokenKind {
 }
 
 impl TokenKind {
-    pub fn ident(&self) -> Option<&str> {
+    pub fn ident(&self) -> Result<&str, String> {
         match self {
-            Self::Ident(s) => Some(s),
-            _ => None,
+            Self::Ident(s) => Ok(s),
+            s => Err(format!("wanted ident, got {}", s)),
         }
     }
 
-    pub fn as_attribute(&self) -> Option<AttributeType> {
-        self.to_string().parse::<AttributeType>().ok()
-    }
-
-    pub fn is_assign_op(&self) -> bool {
-        matches!(
-            self,
-            Self::Punc(Punctuator::Assign)
-                | Self::Punc(Punctuator::DivAssign)
-                | Self::Punc(Punctuator::MinusAssign)
-                | Self::Punc(Punctuator::ModAssign)
-                | Self::Punc(Punctuator::MultAssign)
-                | Self::Punc(Punctuator::PlusAssign)
-                | Self::Punc(Punctuator::BitAndAssign)
-                | Self::Punc(Punctuator::BitOrAssign)
-                | Self::Punc(Punctuator::BitRightShiftAssign)
-                | Self::Punc(Punctuator::BitLeftShiftAssign)
-                | Self::Punc(Punctuator::BitXorAssign)
-        )
+    pub fn as_attribute(&self) -> Result<AttributeType, String> {
+        self.to_string()
+            .parse::<AttributeType>()
+            .map_err(|_| format!("unknown attribute {}", self.to_string()))
     }
 }
 

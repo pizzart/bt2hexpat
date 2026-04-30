@@ -27,6 +27,7 @@ pub enum DataType {
     TimeT,
     Time64T,
     Guid,
+    String,
     Array(Box<DataType>, Option<Box<Expression>>),
     Struct(Struct),
     Enum(Box<Enum>),
@@ -114,6 +115,7 @@ impl fmt::Display for DataType {
             Self::TimeT => "time_t",
             Self::Time64T => "time_64_t",
             Self::Guid => "GUID",
+            Self::String => "string",
             Self::Array(dt, size) => &format!(
                 "{}{}",
                 dt,
@@ -164,6 +166,7 @@ impl FromStr for DataType {
             "time_t" => Ok(Self::TimeT),
             "time_64_t" => Ok(Self::Time64T),
             "guid" => Ok(Self::Guid),
+            "string" => Ok(Self::String),
             _ => Err(ParseDataTypeErr),
         }
     }
@@ -189,6 +192,7 @@ impl ToImhex for DataType {
             Self::TimeT => Ok("type::time_t".to_owned()),
             Self::Time64T => Ok("type::time_64_t".to_owned()),
             Self::Guid => Ok("type::GUID".to_owned()),
+            Self::String => Ok("str".to_owned()),
             Self::Struct(s) => s.try_to_imhex(),
             Self::Enum(e) => e.try_to_imhex(),
             Self::Array(base_ty, _) => base_ty.try_to_imhex(),

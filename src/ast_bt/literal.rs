@@ -26,28 +26,28 @@ pub enum Literal {
 
 #[allow(dead_code)]
 impl Literal {
-    pub fn char(&self) -> Option<&char> {
+    pub fn char(self) -> Option<char> {
         match self {
             Self::Char(c) => Some(c),
             _ => None,
         }
     }
 
-    pub fn string(&self) -> Option<&String> {
+    pub fn string(self) -> Option<String> {
         match self {
             Self::String(s) => Some(s),
             _ => None,
         }
     }
 
-    pub fn int(&self) -> Option<&usize> {
+    pub fn int(self) -> Option<usize> {
         match self {
             Self::Decimal(i) | Self::Binary(i) | Self::Hexadecimal(i) | Self::Octal(i) => Some(i),
             _ => None,
         }
     }
 
-    pub fn floating_point(&self) -> Option<&f64> {
+    pub fn floating_point(self) -> Option<f64> {
         match self {
             Self::Float(f) | Self::Double(f) => Some(f),
             _ => None,
