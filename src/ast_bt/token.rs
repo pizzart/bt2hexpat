@@ -1,4 +1,4 @@
-use std::{fmt, str::FromStr};
+use std::str::FromStr;
 
 use crate::ast_bt::attr::{AttributeType, Color, DisplayFormat};
 use crate::ast_bt::{data_type::DataType, literal::Literal};

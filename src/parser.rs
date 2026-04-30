@@ -15,7 +15,7 @@ pub enum ParseErrorType {
     Other(String),
 }
 
-type ParseResult<T> = Result<T, ParseErrorType>;
+type ParseResult<T> = Result<T, Box<ParseErrorType>>;
 
 pub struct Parser {
     tokens: VecDeque<(TokenKind, String)>,
@@ -25,17 +25,6 @@ pub struct Parser {
 impl Parser {
     pub fn new(tokens: VecDeque<(TokenKind, String)>) -> Self {
         Parser { tokens, pos: 0 }
-    }
-
-    fn get_context(&self) -> String {
-        let mut context = "Context: ".to_string();
-        for i in 0..=3 {
-            if let Some(t) = self.tokens.get(self.pos + i).map(|(_, s)| s) {
-                context.push_str(t);
-                context.push(' ');
-            }
-        }
-        context
     }
 
     pub fn parse(&mut self) -> ParseResult<BinaryTemplate> {
@@ -88,20 +77,6 @@ impl Parser {
 
     fn parse_expr_stmt(&mut self) -> ParseResult<Statement> {
         let expr = self.parse_expr()?;
-
-        // let s = self.peek_token()?;
-        // if s.is_assign_op() {
-        //     let sign = s.to_string();
-        //     self.advance();
-        //     let rhs = self.parse_expr()?;
-        //     self.expect(Punctuator::Semicolon)?;
-        //     return Ok(Statement::Assign {
-        //         left: expr,
-        //         sign,
-        //         right: rhs,
-        //     });
-        // }
-
         self.expect(Punctuator::Semicolon)?;
         Ok(Statement::Expr(expr))
     }
@@ -206,7 +181,7 @@ impl Parser {
                     return Err(ParseErrorType::Other(format!(
                         "wrong token, expected attribute type, got {}",
                         self.get_token_string_before(1)?
-                    )));
+                    )))?;
                 }
             };
             self.expect(Punctuator::Assign)?;
@@ -283,10 +258,7 @@ impl Parser {
     }
 
     fn parse_ident(&mut self) -> ParseResult<Ident> {
-        Ok(self
-            .read_token()?
-            .ident()
-            .map_err(|s| ParseErrorType::Other(s))?)
+        Ok(self.read_token()?.ident().map_err(ParseErrorType::Other)?)
     }
 
     fn parse_var_or_fn_def(&mut self) -> ParseResult<Vec<Statement>> {
@@ -555,7 +527,7 @@ impl Parser {
                     return Err(ParseErrorType::Other(format!(
                         "invalid token encountered in switch statement, expected case or default, got {}",
                         self.get_token_string_before(1)?
-                    )));
+                    )))?;
                 }
             }
         }
@@ -647,7 +619,7 @@ impl Parser {
                     _ => {
                         return Err(ParseErrorType::Other(
                             "no type after 'unsigned' found".to_owned(),
-                        ));
+                        ))?;
                     }
                 }
             }
@@ -657,7 +629,7 @@ impl Parser {
                 return Err(ParseErrorType::Other(format!(
                     "Nonsense datatype {}",
                     self.get_token_string_before(1)?
-                )));
+                )))?;
             }
         };
 
@@ -787,7 +759,7 @@ impl Parser {
             _ => Err(ParseErrorType::Other(format!(
                 "invalid starting token {} for expression",
                 self.get_token_string_before(1)?
-            ))),
+            )))?,
         }
     }
 
@@ -848,7 +820,7 @@ impl Parser {
                 )),
                 None => Ok(Expression::Literal(l)),
             },
-            _ => Err(ParseErrorType::Other("wrong token kind".to_owned())),
+            _ => Err(ParseErrorType::Other("wrong token kind".to_owned()))?,
         }
     }
 
@@ -890,7 +862,7 @@ impl Parser {
         self.tokens
             .get(self.pos - before)
             .map(|(_, s)| s.as_str())
-            .ok_or(ParseErrorType::Eof)
+            .ok_or(ParseErrorType::Eof.into())
     }
 
     fn peek_token(&self) -> ParseResult<&TokenKind> {
@@ -910,7 +882,7 @@ impl Parser {
             .tokens
             .get(self.pos)
             .cloned()
-            .ok_or(ParseErrorType::Eof)
+            .ok_or(ParseErrorType::Eof.into())
             .map(|(t, _)| t);
         self.pos += 1;
         t
@@ -918,7 +890,7 @@ impl Parser {
 
     fn advance(&mut self) -> ParseResult<()> {
         if self.is_eof() {
-            return Err(ParseErrorType::Eof);
+            return Err(ParseErrorType::Eof)?;
         }
         self.pos += 1;
         Ok(())
@@ -934,7 +906,7 @@ impl Parser {
         if next == token {
             Ok(())
         } else {
-            Err(ParseErrorType::Expect(token, next))
+            Err(ParseErrorType::Expect(token, next))?
         }
     }
 
@@ -969,7 +941,7 @@ impl Parser {
                 return Ok(e);
             }
         }
-        Err(err)
+        Err(err)?
     }
 
     fn is_eof(&self) -> bool {

@@ -183,11 +183,10 @@ impl Translator {
                                 _ => (),
                             }
                         }
-                        if count > 0 {
-                            match ident {
-                                Ident::Custom(ref mut i) => i.push_str(count.to_string().as_str()),
-                                _ => (),
-                            }
+                        if count > 0
+                            && let Ident::Custom(ref mut i) = ident
+                        {
+                            i.push_str(count.to_string().as_str());
                         }
                         let v = value.as_ref().map(|e| self.create_expression(e));
                         let mut attrs = attrs.clone();
@@ -200,7 +199,7 @@ impl Translator {
                             });
                         }
                         stmts.push(Statement::VarDef {
-                            ident: ident,
+                            ident,
                             ty: self.create_datatype(ty, dest),
                             value: v,
                             local: *local,
@@ -212,7 +211,7 @@ impl Translator {
                 }
                 Statement::Expr(e) => stmts.push(Statement::Expr(self.create_expression(e))),
                 Statement::Return(e) => stmts.push(Statement::Return(
-                    e.as_ref().map(|e| self.create_expression(&e)),
+                    e.as_ref().map(|e| self.create_expression(e)),
                 )),
                 _ => stmts.push(stmt.clone()),
             }
@@ -283,7 +282,7 @@ impl Translator {
                             args,
                         ),
                         ReservedFunction::SPrintf => Expression::BinaryOp(
-                            Box::new(args.get(0).cloned().unwrap_or_else(|| {
+                            Box::new(args.first().cloned().unwrap_or_else(|| {
                                 Expression::Identifier(Ident::Custom("NONE".to_owned()))
                             })),
                             Punctuator::Assign,
@@ -348,7 +347,7 @@ impl Translator {
                         | ReservedFunction::ReadUInt64
                         | ReservedFunction::ReadUQuad
                         | ReservedFunction::ReadUShort => {
-                            let address = args.first().unwrap_or_else(|| &Expression::DollarOp);
+                            let address = args.first().unwrap_or(&Expression::DollarOp);
                             let dt = match i {
                                 ReservedFunction::ReadByte => DataType::I8,
                                 ReservedFunction::ReadUByte => DataType::U8,
@@ -423,7 +422,7 @@ impl Translator {
             ),
             DataType::Array(dt, e) => DataType::Array(
                 Box::new(self.create_datatype(dt, dest)),
-                e.as_ref().map(|e| Box::new(self.create_expression(&e))),
+                e.as_ref().map(|e| Box::new(self.create_expression(e))),
             ),
             DataType::Enum(e) => {
                 dest.push(Statement::EnumDef(self.create_enum(e)));
