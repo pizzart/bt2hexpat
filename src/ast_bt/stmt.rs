@@ -262,7 +262,7 @@ pub enum Statement {
         body: Block,
     },
     For {
-        init: Expression,
+        init: Vec<Statement>,
         test: Expression,
         upd: Expression,
         body: Block,
@@ -400,13 +400,23 @@ impl ToHexpatStr for Statement {
                 test,
                 upd,
                 body,
-            } => Ok(format!(
-                "for ({}, {}, {}) {}",
-                init.to_hexpat()?,
-                test.to_hexpat()?,
-                upd.to_hexpat()?,
-                body.to_hexpat()?
-            )),
+            } => {
+                let mut output = String::new();
+                if init.len() > 1 {
+                    for (i, st) in init.iter().enumerate() {
+                        if i == init.len() - 2 {
+                            output.push_str(&st.to_hexpat()?);
+                        }
+                    }
+                }
+                Ok(format!(
+                    "for ({}, {}, {}) {}",
+                    init.last().expect("for loop initialization requires at least one variable, pattern invalid").to_hexpat()?,
+                    test.to_hexpat()?,
+                    upd.to_hexpat()?,
+                    body.to_hexpat()?
+                ))
+            }
             Statement::Block(block) => block.to_hexpat(),
             Statement::Return(expr) => expr.as_ref().map_or_else(
                 || Ok("return".to_owned()),

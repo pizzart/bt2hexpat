@@ -1,6 +1,9 @@
 use thiserror::Error;
 
-use crate::ast_bt::{attr::*, data_type::*, stmt::*, template::*, token::*};
+use crate::{
+    ast_bt::{attr::*, data_type::*, stmt::*, template::*, token::*},
+    traits::to_imhex::ToHexpatStr,
+};
 use std::collections::VecDeque;
 
 #[derive(Debug, Error)]
@@ -392,8 +395,20 @@ impl Parser {
     fn try_parse_var_def(&mut self, local: bool) -> ParseResult<Vec<Statement>> {
         let pos = self.pos;
         match self.parse_var_def(local) {
-            Ok(d) => Ok(d),
+            Ok(d) => {
+                eprintln!(
+                    "parsed variable {:?}",
+                    d.iter()
+                        .map(|s| match s {
+                            Statement::VarDef { ident, .. } => ident.to_hexpat().unwrap(),
+                            _ => s.to_hexpat().unwrap(),
+                        })
+                        .collect::<Vec<String>>()
+                );
+                Ok(d)
+            }
             Err(e) => {
+                eprintln!("could not parse variable");
                 self.pos = pos;
                 Err(e)
             }
@@ -445,8 +460,7 @@ impl Parser {
         self.expect(Punctuator::LParen)?;
 
         eprintln!("[DEBUG] Parsing for condition");
-        let init = self.parse_expr()?;
-        self.expect(Punctuator::Semicolon)?;
+        let init = self.parse_def_or_stmt()?;
         let test = self.parse_expr()?;
         self.expect(Punctuator::Semicolon)?;
         let upd = self.parse_expr()?;

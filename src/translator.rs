@@ -92,53 +92,28 @@ impl Translator {
                     test,
                     upd,
                     body,
-                } => stmts.push(Statement::For {
-                    init: self.create_expression(init),
-                    test: self.create_expression(test),
-                    upd: self.create_expression(upd),
-                    body: Block(self.create_statements(&body.0, dest, NodeType::Block)),
-                }),
-                Statement::While { condition, body } => {
-                    if self.nodes.len() == 1
-                        && let Expression::UnaryOp(Punctuator::Not, e, UnaryPosition::Prefix) =
-                            condition
-                        && let Expression::Call(f, _) = &**e
-                        && let Expression::Identifier(Ident::Function(ReservedFunction::FEof)) = **f
-                    {
-                        let st = self.create_statements(&body.0, dest, NodeType::Block);
-                        let ty = DataType::Array(
-                            Box::new(DataType::Ident(Ident::Custom("Main".to_owned()))),
-                            Some(Box::new(Expression::Call(
-                                Box::new(Expression::Identifier(Ident::Custom("while".to_owned()))),
-                                vec![self.create_expression(condition)],
-                            ))),
-                        );
-                        dest.push(Statement::StructDef(Struct {
-                            ty: StructType::Struct,
-                            ident: Some(Ident::Custom("Main".to_owned())),
-                            args: Args(vec![]),
-                            body: Block(st),
-                            attrs: Attributes(vec![]),
-                        }));
-                        stmts.push(Statement::VarDef {
-                            ident: Ident::Custom("main".to_owned()),
-                            ty,
-                            value: None,
-                            local: false,
-                            bits: None,
-                            pos: Some(Expression::DollarOp),
-                            attrs: Attributes(vec![]),
+                } => {
+                    if !self.nodes.contains(&NodeType::Struct) {
+                        stmts.push(Statement::For {
+                            init: self.create_statements(init, dest, NodeType::Block),
+                            test: self.create_expression(test),
+                            upd: self.create_expression(upd),
+                            body: Block(self.create_statements(&body.0, dest, NodeType::Block)),
                         });
-                    } else if self.nodes.contains(&NodeType::Struct) {
-                        let st = self.create_statements(&body.0, dest, NodeType::Block);
+                    } else {
+                        let mut st = self.create_statements(&body.0, dest, NodeType::Block);
+                        st.push(Statement::Expr(upd.clone()));
+
                         let str_name = format!("LoopStruct{}", self.new_structs);
                         let ty = DataType::Array(
                             Box::new(DataType::Ident(Ident::Custom(str_name.clone()))),
                             Some(Box::new(Expression::Call(
                                 Box::new(Expression::Identifier(Ident::Custom("while".to_owned()))),
-                                vec![self.create_expression(condition)],
+                                vec![self.create_expression(test)],
                             ))),
                         );
+                        self.new_structs += 1;
+                        dest.append(&mut init.clone());
                         dest.push(Statement::StructDef(Struct {
                             ty: StructType::Struct,
                             ident: Some(Ident::Custom(str_name.clone())),
@@ -146,6 +121,17 @@ impl Translator {
                             body: Block(st),
                             attrs: Attributes(vec![]),
                         }));
+                        for init_st in init {
+                            if let Statement::VarDef { ident, value, .. } = init_st
+                                && let Some(v) = value
+                            {
+                                stmts.push(Statement::Expr(Expression::BinaryOp(
+                                    Box::new(Expression::Identifier(ident.clone())),
+                                    Punctuator::Assign,
+                                    Box::new(v.clone()),
+                                )));
+                            }
+                        }
                         stmts.push(Statement::VarDef {
                             ident: Ident::Custom(str_name.to_lowercase()),
                             ty,
@@ -155,7 +141,18 @@ impl Translator {
                             pos: None,
                             attrs: Attributes(vec![]),
                         });
-                        self.new_structs += 1;
+                    }
+                }
+                Statement::While { condition, body } => {
+                    if !self.nodes.contains(&NodeType::Struct)
+                        && let Expression::UnaryOp(Punctuator::Not, e, UnaryPosition::Prefix) =
+                            condition
+                        && let Expression::Call(f, _) = &**e
+                        && let Expression::Identifier(Ident::Function(ReservedFunction::FEof)) = **f
+                    {
+                        stmts.push(self.create_loop_struct(dest, &body.0, condition));
+                    } else if self.nodes.contains(&NodeType::Struct) {
+                        stmts.push(self.create_loop_struct(dest, &body.0, condition));
                     } else {
                         stmts.push(Statement::While {
                             condition: self.create_expression(condition),
@@ -246,7 +243,6 @@ impl Translator {
                                 )),
                             }),
                         )));
-                    } else if self.nodes.len() == 1 && value.is_none() && pos.is_none() && !local {
                     } else {
                         let mut ident = ident.clone();
                         let mut count = 0;
@@ -574,6 +570,40 @@ impl Translator {
             args: src.args.clone(),
             body: Block(self.create_statements(&src.body.0, dest, NodeType::Struct)),
             attrs: self.create_attrs(&src.attrs),
+        }
+    }
+
+    fn create_loop_struct(
+        &mut self,
+        dest: &mut Vec<Statement>,
+        loop_body: &Vec<Statement>,
+        condition: &Expression,
+    ) -> Statement {
+        let st = self.create_statements(loop_body, dest, NodeType::Block);
+        let str_name = format!("LoopStruct{}", self.new_structs);
+        let ty = DataType::Array(
+            Box::new(DataType::Ident(Ident::Custom(str_name.clone()))),
+            Some(Box::new(Expression::Call(
+                Box::new(Expression::Identifier(Ident::Custom("while".to_owned()))),
+                vec![self.create_expression(condition)],
+            ))),
+        );
+        dest.push(Statement::StructDef(Struct {
+            ty: StructType::Struct,
+            ident: Some(Ident::Custom(str_name.clone())),
+            args: Args(vec![]),
+            body: Block(st),
+            attrs: Attributes(vec![]),
+        }));
+        self.new_structs += 1;
+        Statement::VarDef {
+            ident: Ident::Custom(str_name.to_lowercase()),
+            ty,
+            value: None,
+            local: false,
+            bits: None,
+            pos: None,
+            attrs: Attributes(vec![]),
         }
     }
 }
