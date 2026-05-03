@@ -33,7 +33,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse the template
     let tokens = tokenize(content);
     let mut parser = Parser::new(tokens);
-    let template = parser.parse().unwrap();
+    let template = parser.parse()?;
 
     // Convert to ImHex format
     let mut converter = Translator::new();

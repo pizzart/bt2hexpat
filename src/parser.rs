@@ -203,21 +203,22 @@ impl Parser {
     fn parse_enum(&mut self) -> ParseResult<Enum> {
         self.expect(Keyword::Enum)?;
 
-        let mut token = self.read_token()?;
-        let ty = if token == Punctuator::LAngledBracket {
-            token = self.read_token()?;
-            Some(self.parse_type()?)
+        let ty = if self.peek_token()? == &Punctuator::LAngledBracket {
+            self.advance()?;
+            let t = Some(self.parse_type()?);
+            self.expect(Punctuator::RAngledBracket)?;
+            t
         } else {
             None
         };
 
-        let ident = token.ident().ok();
+        let ident = if let Ok(i) = self.peek_token()?.clone().ident() {
+            self.advance()?;
+            Some(i)
+        } else {
+            None
+        };
         eprintln!("[DEBUG] Parsing enum: {:?}", ident);
-
-        token = self.read_token()?;
-        if token == Punctuator::Colon {
-            self.parse_type()?;
-        }
 
         self.expect(Punctuator::LBrace)?;
 
@@ -497,29 +498,47 @@ impl Parser {
         self.expect(Punctuator::LBrace)?;
 
         eprintln!("[DEBUG] Entering switch block");
-        let mut cases = Vec::new();
+        let mut cases: Vec<(Expression, Block, bool)> = Vec::new();
         let mut default = None;
 
         while self.peek_token()? != &Punctuator::RBrace {
             let token = self.read_token()?;
 
+            // some templates actually use fallthrough... fml
             match token {
                 TokenKind::Keyword(Keyword::Case) => {
+                    eprintln!("parsing case");
                     let expr = self.parse_expr()?;
                     self.expect(Punctuator::Colon)?;
                     let mut stmts = vec![];
-                    while self.peek_token()? != &Keyword::Break {
+                    while !matches!(
+                        self.peek_token()?,
+                        TokenKind::Keyword(Keyword::Break | Keyword::Case | Keyword::Default)
+                    ) {
                         stmts.append(&mut self.parse_def_or_stmt()?);
                     }
-                    self.expect(Keyword::Break)?;
-                    self.expect(Punctuator::Semicolon)?;
-                    cases.push((expr, Block(stmts)));
+                    for (_, block, _) in cases.iter_mut().filter(|(_, _, f)| !*f) {
+                        block.0.append(&mut stmts.clone());
+                    }
+                    let finished = self.peek_token()? == &Keyword::Break;
+                    if self.peek_token()? == &Keyword::Break {
+                        self.expect(Keyword::Break)?;
+                        self.expect(Punctuator::Semicolon)?;
+                        for (_, _, f) in cases.iter_mut() {
+                            *f = true;
+                        }
+                    }
+                    cases.push((expr, Block(stmts), finished));
                 }
                 TokenKind::Keyword(Keyword::Default) => {
+                    eprintln!("parsing default");
                     self.expect(Punctuator::Colon)?;
                     let mut stmts = vec![];
                     while self.peek_token()? != &Punctuator::RBrace {
                         stmts.append(&mut self.parse_def_or_stmt()?);
+                    }
+                    for (_, block, _) in cases.iter_mut().filter(|(_, _, f)| !*f) {
+                        block.0.append(&mut stmts.clone());
                     }
                     default.replace(Block(stmts));
                 }
@@ -538,7 +557,7 @@ impl Parser {
 
         Ok(Statement::Switch {
             expr,
-            cases,
+            cases: cases.into_iter().map(|(e, b, _)| (e, b)).collect(),
             default,
         })
     }

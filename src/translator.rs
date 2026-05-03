@@ -11,20 +11,30 @@ use crate::{
     traits::to_imhex::{ToHexpatErr, ToHexpatStr},
 };
 
+#[derive(Eq, PartialEq)]
+enum NodeType {
+    Struct,
+    Block,
+    TopLevel,
+}
+
+#[derive(Default)]
 pub struct Translator {
     current_color: Option<Literal>,
+    nodes: Vec<NodeType>,
+    new_structs: usize,
+    positioned_var: bool,
 }
 
 impl Translator {
     pub fn new() -> Self {
-        Translator {
-            current_color: None,
-        }
+        Translator::default()
     }
 
     pub fn translate(&mut self, template: &BinaryTemplate) -> Result<String, ToHexpatErr> {
         let mut def_stmts = vec![];
-        let mut stmts = self.create_statements(&template.statements, &mut def_stmts);
+        let mut stmts =
+            self.create_statements(&template.statements, &mut def_stmts, NodeType::TopLevel);
         let mut after_onelines = 0;
         for (i, stmt) in stmts.iter().enumerate() {
             if !stmt.is_oneline() {
@@ -52,13 +62,17 @@ impl Translator {
         &mut self,
         src: &Vec<Statement>,
         dest: &mut Vec<Statement>,
+        node_ty: NodeType,
     ) -> Vec<Statement> {
+        self.nodes.push(node_ty);
         let mut stmts = vec![];
         for stmt in src {
             match stmt {
-                Statement::Block(b) => {
-                    stmts.push(Statement::Block(Block(self.create_statements(&b.0, dest))))
-                }
+                Statement::Block(b) => stmts.push(Statement::Block(Block(self.create_statements(
+                    &b.0,
+                    dest,
+                    NodeType::Block,
+                )))),
                 Statement::FnDef {
                     ty,
                     ident,
@@ -72,7 +86,7 @@ impl Translator {
                             .map(|(dt, i)| (self.create_datatype(dt, dest), i.clone()))
                             .collect(),
                     ),
-                    body: Block(self.create_statements(&body.0, dest)),
+                    body: Block(self.create_statements(&body.0, dest, NodeType::Block)),
                 }),
                 Statement::For {
                     init,
@@ -83,22 +97,89 @@ impl Translator {
                     init: self.create_expression(init),
                     test: self.create_expression(test),
                     upd: self.create_expression(upd),
-                    body: Block(self.create_statements(&body.0, dest)),
+                    body: Block(self.create_statements(&body.0, dest, NodeType::Block)),
                 }),
-                Statement::While { condition, body } => stmts.push(Statement::While {
-                    condition: self.create_expression(condition),
-                    body: Block(self.create_statements(&body.0, dest)),
-                }),
+                Statement::While { condition, body } => {
+                    if self.nodes.len() == 1
+                        && let Expression::UnaryOp(Punctuator::Not, e, UnaryPosition::Prefix) =
+                            condition
+                        && let Expression::Call(f, _) = &**e
+                        && let Expression::Identifier(Ident::Function(ReservedFunction::FEof)) = **f
+                    {
+                        let st = self.create_statements(&body.0, dest, NodeType::Block);
+                        let ty = DataType::Array(
+                            Box::new(DataType::Ident(Ident::Custom("Main".to_owned()))),
+                            Some(Box::new(Expression::Call(
+                                Box::new(Expression::Identifier(Ident::Custom("while".to_owned()))),
+                                vec![self.create_expression(condition)],
+                            ))),
+                        );
+                        dest.push(Statement::StructDef(Struct {
+                            ty: StructType::Struct,
+                            ident: Some(Ident::Custom("Main".to_owned())),
+                            args: Args(vec![]),
+                            body: Block(st),
+                            attrs: Attributes(vec![]),
+                        }));
+                        let p = if self.positioned_var {
+                            Expression::DollarOp
+                        } else {
+                            Expression::Literal(Literal::Decimal(0))
+                        };
+                        stmts.push(Statement::VarDef {
+                            ident: Ident::Custom("main".to_owned()),
+                            ty,
+                            value: None,
+                            local: false,
+                            bits: None,
+                            pos: Some(p),
+                            attrs: Attributes(vec![]),
+                        });
+                        self.positioned_var = true;
+                    } else if self.nodes.contains(&NodeType::Struct) {
+                        let st = self.create_statements(&body.0, dest, NodeType::Block);
+                        let str_name = format!("LoopStruct{}", self.new_structs);
+                        let ty = DataType::Array(
+                            Box::new(DataType::Ident(Ident::Custom(str_name.clone()))),
+                            Some(Box::new(Expression::Call(
+                                Box::new(Expression::Identifier(Ident::Custom("while".to_owned()))),
+                                vec![self.create_expression(condition)],
+                            ))),
+                        );
+                        dest.push(Statement::StructDef(Struct {
+                            ty: StructType::Struct,
+                            ident: Some(Ident::Custom(str_name.clone())),
+                            args: Args(vec![]),
+                            body: Block(st),
+                            attrs: Attributes(vec![]),
+                        }));
+                        stmts.push(Statement::VarDef {
+                            ident: Ident::Custom(str_name.to_lowercase()),
+                            ty,
+                            value: None,
+                            local: false,
+                            bits: None,
+                            pos: None,
+                            attrs: Attributes(vec![]),
+                        });
+                        self.new_structs += 1;
+                    } else {
+                        stmts.push(Statement::While {
+                            condition: self.create_expression(condition),
+                            body: Block(self.create_statements(&body.0, dest, NodeType::Block)),
+                        });
+                    }
+                }
                 Statement::If {
                     condition,
                     then_block,
                     else_block,
                 } => stmts.push(Statement::If {
                     condition: self.create_expression(condition),
-                    then_block: Block(self.create_statements(&then_block.0, dest)),
+                    then_block: Block(self.create_statements(&then_block.0, dest, NodeType::Block)),
                     else_block: else_block
                         .clone()
-                        .map(|b| Block(self.create_statements(&b.0, dest))),
+                        .map(|b| Block(self.create_statements(&b.0, dest, NodeType::Block))),
                 }),
                 Statement::EnumDef(e) => {
                     dest.push(Statement::EnumDef(self.create_enum(e)));
@@ -117,13 +198,13 @@ impl Translator {
                         .map(|(e, block)| {
                             (
                                 self.create_expression(e),
-                                Block(self.create_statements(&block.0, dest)),
+                                Block(self.create_statements(&block.0, dest, NodeType::Block)),
                             )
                         })
                         .collect();
                     let df = default
                         .clone()
-                        .map(|d| Block(self.create_statements(&d.0, dest)));
+                        .map(|d| Block(self.create_statements(&d.0, dest, NodeType::Block)));
                     stmts.push(Statement::Switch {
                         expr: self.create_expression(expr),
                         cases: cs,
@@ -148,7 +229,7 @@ impl Translator {
                     pos,
                     attrs,
                 } => {
-                    let p = pos.as_ref().map(|e| self.create_expression(e));
+                    let mut p = pos.as_ref().map(|e| self.create_expression(e));
                     if let Ident::Custom(i) = ident
                         && i == "padding"
                         && value.is_none() & !local
@@ -172,6 +253,7 @@ impl Translator {
                                 )),
                             }),
                         )));
+                    } else if self.nodes.len() == 1 && value.is_none() && pos.is_none() && !local {
                     } else {
                         let mut ident = ident.clone();
                         let mut count = 0;
@@ -198,6 +280,14 @@ impl Translator {
                                 value: Expression::Literal(c.clone()),
                             });
                         }
+                        if self.nodes.len() == 1 && value.is_none() && p.is_none() && !local {
+                            if self.positioned_var {
+                                p = Some(Expression::DollarOp);
+                            } else {
+                                p = Some(Expression::Literal(Literal::Decimal(0)));
+                                self.positioned_var = true;
+                            }
+                        }
                         stmts.push(Statement::VarDef {
                             ident,
                             ty: self.create_datatype(ty, dest),
@@ -216,6 +306,7 @@ impl Translator {
                 _ => stmts.push(stmt.clone()),
             }
         }
+        self.nodes.pop();
         stmts
     }
 
@@ -487,7 +578,7 @@ impl Translator {
             ty: src.ty.clone(),
             ident: src.ident.clone(),
             args: src.args.clone(),
-            body: Block(self.create_statements(&src.body.0, dest)),
+            body: Block(self.create_statements(&src.body.0, dest, NodeType::Struct)),
             attrs: self.create_attrs(&src.attrs),
         }
     }
