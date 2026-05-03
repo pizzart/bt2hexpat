@@ -269,7 +269,11 @@ impl Translator {
                                 value: Expression::Literal(c.clone()),
                             });
                         }
-                        if self.nodes.len() == 1 && value.is_none() && p.is_none() && !local {
+                        if !self.nodes.contains(&NodeType::Struct)
+                            && value.is_none()
+                            && p.is_none()
+                            && !local
+                        {
                             p = Some(Expression::DollarOp);
                         }
                         stmts.push(Statement::VarDef {
