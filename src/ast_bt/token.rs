@@ -116,6 +116,7 @@ str_enum! {
         FileSize => "FileSize",
         Printf => "Printf",
         Warning => "Warning",
+        Exit => "Exit",
         SPrintf => "SPrintf",
         Str => "Str",
         SetBackColor => "SetBackColor",

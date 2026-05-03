@@ -23,7 +23,6 @@ pub struct Translator {
     current_color: Option<Literal>,
     nodes: Vec<NodeType>,
     new_structs: usize,
-    positioned_var: bool,
 }
 
 impl Translator {
@@ -121,21 +120,15 @@ impl Translator {
                             body: Block(st),
                             attrs: Attributes(vec![]),
                         }));
-                        let p = if self.positioned_var {
-                            Expression::DollarOp
-                        } else {
-                            Expression::Literal(Literal::Decimal(0))
-                        };
                         stmts.push(Statement::VarDef {
                             ident: Ident::Custom("main".to_owned()),
                             ty,
                             value: None,
                             local: false,
                             bits: None,
-                            pos: Some(p),
+                            pos: Some(Expression::DollarOp),
                             attrs: Attributes(vec![]),
                         });
-                        self.positioned_var = true;
                     } else if self.nodes.contains(&NodeType::Struct) {
                         let st = self.create_statements(&body.0, dest, NodeType::Block);
                         let str_name = format!("LoopStruct{}", self.new_structs);
@@ -281,12 +274,7 @@ impl Translator {
                             });
                         }
                         if self.nodes.len() == 1 && value.is_none() && p.is_none() && !local {
-                            if self.positioned_var {
-                                p = Some(Expression::DollarOp);
-                            } else {
-                                p = Some(Expression::Literal(Literal::Decimal(0)));
-                                self.positioned_var = true;
-                            }
+                            p = Some(Expression::DollarOp);
                         }
                         stmts.push(Statement::VarDef {
                             ident,
@@ -369,6 +357,12 @@ impl Translator {
                         ReservedFunction::Warning => Expression::Call(
                             Box::new(Expression::Identifier(Ident::from_path_vec(vec![
                                 "std", "warning",
+                            ]))),
+                            args,
+                        ),
+                        ReservedFunction::Exit => Expression::Call(
+                            Box::new(Expression::Identifier(Ident::from_path_vec(vec![
+                                "std", "error",
                             ]))),
                             args,
                         ),
